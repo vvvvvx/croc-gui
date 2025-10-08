@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted,onBeforeUnmount ,ref } from "vue";
+import { onMounted,onBeforeUnmount,ref,nextTick,watch} from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { homeDir } from "@tauri-apps/api/path";
@@ -37,8 +37,10 @@ const savePath=ref<string>(""); // Application directory path
 const sendStatus=ref<string>("Pending"); // Overall send status
 const receiveStatus=ref<string>(""); // Overall receive status
 const isSending=ref<boolean>(false); // Whether currently sending files
-const chatText=ref<string>("聊天记录")
-const inputText=ref<string>("")
+const chatText=ref<string>("");
+const inputText=ref<string>(""); // text to send
+const chatArea=ref<HTMLTextAreaElement | null>(null); //聊天窗口TextArea
+
 
 let listenError: UnlistenFn | null = null;
 let listenSendProgress: UnlistenFn | null = null;
@@ -51,6 +53,11 @@ let listenReceiveFileDone: UnlistenFn | null = null;
 let listenSendFileSuccess: UnlistenFn | null = null;
 let listenReceiveFileSuccess: UnlistenFn | null = null;
 let listenReceiveStatus: UnlistenFn | null = null;
+let listenSendTextSuccess: UnlistenFn | null = null;
+let listenSendTextStatus: UnlistenFn | null = null;
+let listenSendTextCode: UnlistenFn | null = null;
+let listenReceiveTextMsg :UnlistenFn | null = null;
+let listenReceiveTextStatus :UnlistenFn | null = null;
 
 async function selectFile() {
   const selected = await open({
@@ -82,6 +89,11 @@ function deleteCode(code:string){
     waitingCodesList.value.splice(index,1);
   }
   console.log(waitingCodesList); 
+}
+
+function getTime():string{
+  return new Date().toLocaleString();
+  
 }
 async function selectSaveFolder() {
   const selected = await open({
@@ -132,9 +144,22 @@ async function sendText() {
     alert("请输入发送文本。\nEnter text first.");
     return;
   }
+  if(crocCode.value.trim()!=="" && isWaiting(crocCode.value)) {
+    alert("Code: "+ crocCode.value+"\n\n最后一次发送的消息对方还未接收，等待接收完成。\nThe last sent msg has not been received.\nWaiting for the reception to complete.")
+    return;
+  }
+
+  if(crocCode.value.trim()!=="" && !isWaiting(crocCode.value)) {
+    waitingCodesList.value.push(crocCode.value);
+  }
+  await invoke("send_text", { msg:inputText.value, code: crocCode.value });
 }
 async function receiveText() {
-
+  if(crocCode.value.trim()===""){
+    alert("请输入Code。\nEnter Code first.");
+    return;
+  }
+  await invoke("receive_text", {  code: crocCode.value });
 }
 onMounted(async () => {
   savePath.value = await homeDir();
@@ -227,6 +252,52 @@ onMounted(async () => {
     receiveStatus.value = event.payload as string;
     console.log("Overall receive status update:", receiveStatus.value);
   });
+  listenSendTextCode = await listen("croc-send-text-code", (event) => {
+    const code = event.payload as string;
+    crocCode.value = code;
+    if(!isWaiting(code)){
+      waitingCodesList.value.push(code);
+    }
+    chatText.value += "[To:] "+getTime()+" ["+code+"]\n"+inputText.value;
+    inputText.value="";
+    console.log("Received croc code:", crocCode.value);
+  });
+  listenSendTextSuccess = await listen("croc-send-text-success", (event) => {
+    const message = event.payload as emitInfo;
+    chatText.value += " (Received)\n\n"; //sendStatus.value+"-["+message.croc_code+"]\n"+message.info+"\n";
+    if (isWaiting(message.croc_code)){
+      deleteCode(message.croc_code);
+    }
+    console.log("Croc receive success:", message);
+  });
+  listenSendTextStatus = await listen("croc-send-text-status",(event)=>{
+    const message = event.payload as emitStatus;
+    if(message.croc_code===crocCode.value){
+      sendStatus.value=message.status;
+    }
+  });
+  listenReceiveTextStatus = await listen("croc-receive-text-status",(event)=>{
+    const message = event.payload as emitStatus;
+    if(message.croc_code===crocCode.value){
+      sendStatus.value=message.status;
+    }
+  });
+  listenReceiveTextMsg = await listen("croc-receive-text-msg",(event)=>{
+    const message = event.payload as emitInfo;
+    //alert(message.info);
+    if(message.croc_code===crocCode.value){
+      chatText.value += "[From:] "+getTime()+" ["+message.croc_code+"]\n"+ message.info+"\n\n";
+    }
+  });
+
+
+});
+
+watch(chatText,async ()=>{
+  await nextTick(); //等待TextArea渲染
+  if (chatText.value){
+    chatArea.value.scrollTop=chatArea.value.scrollHeight;
+  }
 });
 
 onBeforeUnmount(() => {
@@ -241,6 +312,11 @@ onBeforeUnmount(() => {
   listenReceiveFileDone?.();
   listenReceiveFileSuccess?.();
   listenReceiveStatus?.();
+  listenSendTextSuccess?.();
+  listenSendTextStatus?.();
+  listenSendTextCode?.();
+  listenReceiveTextMsg?.();
+  listenReceiveTextStatus?.();
 });
 
 </script>
@@ -432,7 +508,7 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
           <div class="text-scrollable-area  mt-0" >
             <div class="row">
               <div class="col-12 " >
-                <textarea class="form-control pl-0 bg-dark text-white " v-model="chatText" style="height:calc(99vh - 200px);border:none; border-top:1px solid #ddd; resize:none;" readonly>
+                <textarea ref="chatArea" class="form-control pl-0 bg-dark text-white " v-model="chatText" style="height:calc(99vh - 200px);border:none; border-top:1px solid #ddd; resize:none;" readonly>
                 </textarea>
               </div>
             </div>

@@ -21,31 +21,36 @@ static RE_HASHING: Lazy<Regex> = Lazy::new(|| {
     //Regex::new(r"Hashing\s+([^\s%]+)\s*(\d+)%\s*\|([^|]+)\|\s*\((\d*\.?\d*)\s*MB/s\)\s*\[(\d+)(s|m|month|year):(\d+)\5\]")
     //(Hashing)   (文件名)   (百分比)  (进度条)               (速度)         (时间1 单位 : 时间2 单位)
     Regex::new(r"(Hashing)\s+([^\s%]+)\s*(\d+%)\s*\|([^|]*)\|\s*(\(\d+\.?\d*\s+[a-zA-Z]+/s\))\s+(\[\d+\.?\d*[a-zA-Z]+:\d+\.?\d*[a-zA-Z]+\])")
-        .expect("Invalid regex for Format1")
+        .expect("Invalid regex for Hashing")
 });
 
 static RE_SENDING: Lazy<Regex> = Lazy::new(|| {
     //Regex::new(r"([^\s%]+)\s*(\d+)%\s*\|([^|]+)\|\s*\((\d*\.?\d*)/(\d*\.?\d*)\s*MB,\s*(\d*\.?\d*)\s*MB/s\)\s*\[(\d+)(s|m|month|year):(\d+)\7\]")
     //(文件名)   (百分比)  (进度条)               (已发送/总大小    速度)         (时间1 单位 : 时间2 单位)
     Regex::new(r"([^\s%]+)\s*(\d+%)\s*\|([^|]*)\|\s*(\(\d+\.?\d*/\d+\.?\d*\s+[a-zA-Z]+,\s+\d+\.?\d*\s[a-zA-Z]+/s\))\s+(\[\d+\.?\d*[a-zA-Z]+:\d+\.?\d*[a-zA-Z]+\])")
-        .expect("Invalid regex for Format2")
+        .expect("Invalid regex for Sending")
 });
 static RE_COMPLETED: Lazy<Regex> = Lazy::new(|| {
     //(文件名)   (百分比)  (进度条)               (已发送/总大小    速度)
     Regex::new(r"([^\s%]+)\s*(\d+%)\s*\|([^|]*)\|\s*(\(\d+\.?\d*/\d+\.?\d*\s+[a-zA-Z]+,\s+\d+\.?\d*\s[a-zA-Z]+/s\))")
-        .expect("Invalid regex for Format2")
+        .expect("Invalid regex for Completed")
+});
+static RE_RECEIVE_MSG: Lazy<Regex> = Lazy::new(|| {
+    //(文件名)   (百分比)  (进度条)               (已发送/总大小    速度)
+    Regex::new(r"(Receiving\s+\(<\-\d+\.\d+\.\d+\.\d+:\d+\)|Sending\s+\(\->\d+\.\d+\.\d+\.\d+:\d+\))[\n\r]+([^\s%]+([\n\r]*[^\s%])*)")
+        .expect("Invalid regex for ReceiveMsg")
 });
 
 static RE_STATUS: Lazy<Regex> = Lazy::new(|| {
     //Connecting | connecting | Receiving (<-134.12.34:56789) | Sending (->134.12.34:56789)
     Regex::new(r"(Connecting|connecting|Receiving\s+\(<\-\d+\.\d+\.\d+\.\d+:\d+\)|Sending\s+\(\->\d+\.\d+\.\d+\.\d+:\d+\))")
-        .expect("Invalid regex for Format2")
+        .expect("Invalid regex for Status")
 });
 
 
 static RE_PERCENT: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"\d+%")
-        .expect("Invalid regex for Format2")
+        .expect("Invalid regex for Percent")
 });
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -83,7 +88,12 @@ fn get_status(text: &str) -> Option<String> {
         .captures(text)
         .and_then(|caps| caps.get(1).map(|m| m.as_str().to_string()))
 }
-
+fn get_text_msg(text:&str)->Option<String>{
+    RE_RECEIVE_MSG
+        .captures(text)
+        .and_then(|caps| caps.get(2).map(|m| m.as_str().to_string()))
+        
+}
 fn get_progress_data(text: &str) -> Option<ProgressData> {
     // 尝试匹配Hashing格式1
     if let Some(caps) = RE_HASHING.captures(text) {
@@ -626,7 +636,7 @@ async fn receive_files(
                         }
                         if output.contains("(secure channel) not ready") {
                             window
-                                .emit("croc-error", Some("无就绪的发送方。\nNo sender is ready.".to_string()))
+                                .emit("croc-error", Some("可能是Code冲突,可换个或重新自动生成Code重试。\nMaybe Code conflict,you may change Code or automatic generate a Code to try.".to_string()))
                                 .unwrap();
                             return ()
                         }
@@ -698,6 +708,370 @@ async fn receive_files(
 
     Ok(())
 }
+
+
+#[tauri::command]
+async fn send_text(
+    window: tauri::Window,
+    msg: String, // 要发送的信息/ Msg to send
+    code: String,             // 传输代码Code
+) -> Result<(), String> {
+    if msg.trim().is_empty(){
+        window
+            .emit(
+                "croc-send-text-error",
+                Some(EmitInfo{croc_code:code.clone().trim().to_string(),info:"消息不能为空".to_string()}),
+            )
+            .unwrap();
+        return Ok(()); 
+    }
+    let mut croc_args: Vec<String> = vec![];
+    // 构建 croc 命令参数
+    croc_args.push("--yes".to_string());
+    croc_args.push("send".to_string());
+    if !code.trim().is_empty() && OS == "windows" {
+        croc_args.push("--code".to_string());
+        croc_args.push(code.clone());
+    }
+
+    croc_args.push("--text".to_string());
+    croc_args.push(msg.clone());
+
+    println!("Running croc with args: {:?}", croc_args);
+    let code2 = code.clone();
+    tokio::task::spawn_blocking(move || {
+        #[cfg(not(windows))]
+        let mut child: Child = if !code2.trim().is_empty() {
+            Command::new("croc")
+                .args(croc_args)
+                .env("CROC_SECRET", code2.clone()) // 设置环境变量
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("Failed to start rga command")
+        } else {
+            Command::new("croc")
+                .args(croc_args)
+                .env("CROC_NOUI", true.to_string())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("Failed to start rga command")
+        };
+
+        #[cfg(windows)]
+        let mut child = Command::new("croc")
+            .args(croc_args)
+            // windows下需要设置不显示命令行窗口
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("Failed to start rga command");
+        
+        let mut code_str = "".to_string();
+        if !code2.trim().is_empty() {
+            code_str=code2.trim().to_string();
+        }
+        // 处理 croc 输出
+        let mut full_output="".to_string();
+
+        if let Some(stderr) = child.stderr.take() {
+            let mut reader = io::BufReader::new(stderr);
+            let mut buffer = [0u8; 4096];
+            loop {
+                match reader.read(&mut buffer) {
+                    Ok(0) => break, // EOF
+                    Ok(n) => {
+                        let output = String::from_utf8_lossy(&buffer[..n]).to_string();
+                        println!("croc output: {}", output);
+
+                        if let Some(code) = get_code(&output) {
+                            // println!("Extracted code: {}", code);
+                            println!("Output from [stderr].");
+                            window.emit("croc-send-text-code", Some(code.to_string())).unwrap();
+                            code_str=code.to_string();
+                        }
+
+                        if let Some(status) = get_status(&output) {
+                            // println!("Extracted status: {}", status);
+                            window
+                                .emit("croc-send-text-status", Some(EmitStatus{croc_code:code_str.clone(),status: status.to_string()}))
+                                .unwrap();
+                        }
+                        if output.contains("not enough open ports") {
+                            window
+                                .emit("croc-error", Some("太多发送进程未接收，通道池已满，关闭程序以清理。\nToo many sending process have not been received,close this program to kill.".to_string()))
+                                .unwrap();
+                            // return "Repeated sending.".to_string();
+                        }
+                        full_output+=output.as_str();
+                        // window
+                        //     .emit("croc-output", Some(output.to_string()))
+                        //     .unwrap();
+                    }
+                    Err(err) => {
+                        eprintln!("Error reading stderr: {}", err);
+                        break;
+                    }
+                }
+            }
+        }
+        if let Some(stdout) = child.stdout.take() {
+            let mut reader = io::BufReader::new(stdout);
+            let mut buffer = [0u8; 4096];
+            loop {
+                match reader.read(&mut buffer) {
+                    Ok(0) => break, // EOF
+                    Ok(n) => {
+                        let output = String::from_utf8_lossy(&buffer[..n]).to_string();
+                        println!("croc output: {}", output);
+
+                        if let Some(code) = get_code(&output) {
+                            // println!("Extracted code: {}", code);
+                            println!("Output from [stderr].");
+                            window.emit("croc-send-text-code", Some(code.to_string())).unwrap();
+                            code_str=code.to_string();
+                        }
+
+                        if let Some(status) = get_status(&output) {
+                            // println!("Extracted status: {}", status);
+                            window
+                                .emit("croc-send-text-status", Some(EmitStatus{croc_code:code_str.clone(),status: status.to_string()}))
+                                .unwrap();
+                        }
+                        if output.contains("not enough open ports") {
+                            window
+                                .emit("croc-error", Some("太多发送进程未接收，通道池已满，关闭程序以清理。\nToo many sending process have not been received,close this program to kill.".to_string()))
+                                .unwrap();
+                            // return "Repeated sending.".to_string();
+                        }
+                        full_output+=output.as_str();
+                        // window
+                        //     .emit("croc-output", Some(output.to_string()))
+                        //     .unwrap();
+                    }
+                    Err(err) => {
+                        eprintln!("Error reading stderr: {}", err);
+                        break;
+                    }
+                }
+            }
+        }
+
+        // if let Some(status) = get_status(&full_output) {
+        //     // println!("Extracted status: {}", status);
+        //     window
+        //         .emit("croc-send-text-status", Some(EmitStatus{croc_code:code_str.clone(),status: status.to_string()}))
+        //         .unwrap();
+        // }
+        let status = child.wait().expect("Command wasn't running");
+        
+
+        if status.success() {
+            // 传输完成，强制将所有文件状态更新为100%
+            
+            window
+                .emit("croc-send-text-success", Some(EmitInfo{croc_code:code_str.clone().to_string(),info: msg}))
+                .unwrap();
+        } else {
+            window
+                .emit(
+                    "croc-error",
+                    Some(EmitInfo{croc_code:code_str.clone().to_string(),info: format!("Croc command failed with status: {}", status)}),
+                )
+                .unwrap();
+        }
+        // window.emit("croc-receive-file-done", Some("File receiving finished.".to_string()))
+        //     .unwrap();
+
+        ()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn receive_text(
+    window: tauri::Window,
+    code: String,             // 传输代码Code
+) -> Result<(), String> {
+    if code.trim().is_empty(){
+        window
+            .emit(
+                "croc-receive-text-error",
+                Some(EmitInfo{croc_code:code.clone().trim().to_string(),info:"Code can't be empty.".to_string()}),
+            )
+            .unwrap();
+        return Ok(()); 
+    }
+    let mut croc_args: Vec<String> = vec![];
+    // 构建 croc 命令参数
+    croc_args.push("--yes".to_string());
+    if OS=="windows" {
+        croc_args.push(code.clone())
+    }
+
+    println!("Running croc with args: {:?}", croc_args);
+    let code2 = code.clone();
+    tokio::task::spawn_blocking(move || {
+        #[cfg(not(windows))]
+        let mut child: Child = Command::new("croc")
+                .args(croc_args)
+                .env("CROC_SECRET", code2.clone()) // 设置环境变量
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("Failed to start rga command");
+
+        #[cfg(windows)]
+        let mut child = Command::new("croc")
+            .args(croc_args)
+            // windows下需要设置不显示命令行窗口
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("Failed to start rga command");
+        
+        let mut code_str = code2.trim().to_string();
+        // 处理 croc 输出
+        let mut full_output="".to_string();
+
+        if let Some(stderr) = child.stderr.take() {
+            let mut reader = io::BufReader::new(stderr);
+            let mut buffer = [0u8; 4096];
+            loop {
+                match reader.read(&mut buffer) {
+                    Ok(0) => break, // EOF
+                    Ok(n) => {
+                        let output = String::from_utf8_lossy(&buffer[..n]).to_string();
+                        println!("croc output: {}", output);
+
+                        if let Some(status) = get_status(&output) {
+                            // println!("Extracted status: {}", status);
+                            window
+                                .emit("croc-receive-text-status", Some(EmitStatus{croc_code:code_str.clone(),status: status.to_string()}))
+                                .unwrap();
+                        }
+                        if let Some(msg) = get_text_msg(&output) {
+                            // println!("Extracted msg: {}", msg);
+                            window
+                                .emit("croc-receive-text-msg", Some(EmitInfo{croc_code:code_str.clone(),info: msg}))
+                                .unwrap();
+                        }
+                        if output.contains("not enough open ports") {
+                            window
+                                .emit("croc-error", Some("太多发送进程未接收，通道池已满，关闭程序以清理。\nToo many sending process have not been received,close this program to kill.".to_string()))
+                                .unwrap();
+                            // return "Repeated sending.".to_string();
+                        }
+                        if output.contains("(secure channel) not ready") {
+                            window
+                                .emit("croc-error", Some("可能是Code冲突,可换个或重新自动生成Code重试。\nMaybe Code conflict,you may change Code or automatic generate a Code to try.".to_string()))
+                                .unwrap();
+                            return ()
+                        }
+                        full_output+=output.as_str();
+                        // window
+                        //     .emit("croc-output", Some(output.to_string()))
+                        //     .unwrap();
+                    }
+                    Err(err) => {
+                        eprintln!("Error reading stderr: {}", err);
+                        break;
+                    }
+                }
+            }
+        }
+        if let Some(stdout) = child.stdout.take() {
+            let mut reader = io::BufReader::new(stdout);
+            let mut buffer = [0u8; 4096];
+            loop {
+                match reader.read(&mut buffer) {
+                    Ok(0) => break, // EOF
+                    Ok(n) => {
+                        let output = String::from_utf8_lossy(&buffer[..n]).to_string();
+                        println!("croc output: {}", output);
+
+
+                        if let Some(status) = get_status(&output) {
+                            // println!("Extracted status: {}", status);
+                            window
+                                .emit("croc-receive-text-status", Some(EmitStatus{croc_code:code_str.clone(),status: status.to_string()}))
+                                .unwrap();
+                        }
+                        if let Some(msg) = get_text_msg(&output) {
+                            // println!("Extracted msg: {}", msg);
+                            window
+                                .emit("croc-receive-text-msg", Some(EmitInfo{croc_code:code_str.clone(),info: msg}))
+                                .unwrap();
+                        }
+
+                        if output.contains("not enough open ports") {
+                            window
+                                .emit("croc-error", Some("太多发送进程未接收，通道池已满，关闭程序以清理。\nToo many sending process have not been received,close this program to kill.".to_string()))
+                                .unwrap();
+                            // return "Repeated sending.".to_string();
+                        }
+                        if output.contains("(secure channel) not ready") {
+                            window
+                                .emit("croc-error", Some("可能是Code冲突,可换个或重新自动生成Code重试。\nMaybe Code conflict,you may change Code or automatic generate a Code to try.".to_string()))
+                                .unwrap();
+                            return ()
+                        }
+                        full_output+=output.as_str();
+                        // window
+                        //     .emit("croc-output", Some(output.to_string()))
+                        //     .unwrap();
+                    }
+                    Err(err) => {
+                        eprintln!("Error reading stderr: {}", err);
+                        break;
+                    }
+                }
+            }
+        }
+
+        if let Some(msg) = get_text_msg(&full_output) {
+            // println!("Extracted msg: {}", msg);
+            window
+                .emit("croc-receive-text-msg", Some(EmitInfo{croc_code:code_str.clone(),info: msg}))
+                .unwrap();
+        }
+        // if let Some(status) = get_status(&full_output) {
+        //     // println!("Extracted status: {}", status);
+        //     window
+        //         .emit("croc-send-text-status", Some(EmitStatus{croc_code:code_str.clone(),status: status.to_string()}))
+        //         .unwrap();
+        // }
+        let status = child.wait().expect("Command wasn't running");
+        
+
+        if status.success() {
+            // 传输完成，强制将所有文件状态更新为100%
+            
+            window
+                .emit("croc-receive-text-success", Some(EmitInfo{croc_code:code_str.clone(),info: "receive success".to_string()}))
+                .unwrap();
+        } else {
+            window
+                .emit(
+                    "croc-error",
+                    Some(EmitInfo{croc_code:code_str.clone().to_string(),info: format!("Croc command failed with status: {}", status)}),
+                )
+                .unwrap();
+        }
+
+        ()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
 fn kill_croc_process_fn() {
     println!("Searching process cleanning up");
     #[cfg(windows)]
@@ -743,7 +1117,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         //.plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![ send_files,receive_files])
+        .invoke_handler(tauri::generate_handler![ send_files,receive_files,send_text,receive_text])
         // .run(tauri::generate_context!())
         .build(tauri::generate_context!())
         .expect("error while running tauri application");
