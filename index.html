@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link href="/css/bootstrap.min.css" rel="stylesheet">
+
+  <script src="/js/bootstrap.bundle.min.js"></script>
+  <title>Tauri + Vue + Typescript App</title>
+
+</head>
+
+<body class="dark-mode " style="background-color: #333;">
+
+  <div id="app"></div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+<script>
+  // 检查用户的系统主题设置
+  function applyTheme() {
+    const darkModeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    if (darkModeMediaQuery.matches) {
+      document.body.classList.remove('light-mode');
+      document.body.classList.add('dark-mode');
+    } else {
+      document.body.classList.remove('dark-mode');
+      document.body.classList.add('light-mode');
+    }
+  }
+
+  // 初始应用主题
+  //applyTheme();
+
+  // 监听主题变化
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
+</script>
+
+</html>
