@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { onMounted,onBeforeUnmount,ref,nextTick,watch} from "vue";
+import { onMounted,onBeforeUnmount,ref,nextTick,watch,computed} from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { homeDir } from "@tauri-apps/api/path";
 import { listen,UnlistenFn } from "@tauri-apps/api/event";
+import { getVersion } from '@tauri-apps/api/app';
 //import { Command } from "@tauri-apps/plugin-shell";
 //import path from "@tauri-apps/api/path";
 //import fileIcon from "./assets/file.svg";
@@ -27,6 +28,12 @@ interface emitStatus{
   status:string
 }
 
+const curVersion=ref(''); //当前版本号
+const latestVersion=ref(''); //最新版本号
+const latestVersionDesc=ref(''); //最新版本描述
+const versionText=computed(()=>{return ((curVersion.value.toLowerCase() < latestVersion.value.toLowerCase()) && latestVersion.value!='') ?  `<a href="https://gitee.com/vvvvvx/croc-gui/releases" target="_blank" style="text-decoration:none;color:green;">有新版本/New version available.</a>`:`<a href="https://gitee.com/vvvvvx/croc-gui/releases" target="_blank" style="text-decoration:none;color:white;">Version: ${curVersion.value}</a>` ;}); //版本号显示文本
+const versionTitle=computed(()=>{return ((curVersion.value.toLowerCase() < latestVersion.value.toLowerCase()) && latestVersion.value!='') ? `当前版本：${curVersion.value}  最新版本：${latestVersion.value} \n\n新版本更新：\n${latestVersionDesc.value}`:"点击我查看版本更新信息。"}); //版本号鼠标悬停提示
+
 const isFolder = ref(false); // File or Folder mode
 const isFileTransfer= ref(true); //FileTransfer or TextChat
 const sendPaths=ref<fileItem[]>([]); // Selected file or folder paths to send
@@ -42,7 +49,8 @@ const inputText=ref<string>(""); // text to send
 const chatArea=ref<HTMLTextAreaElement | null>(null); //聊天窗口TextArea
 
 
-let listenError: UnlistenFn | null = null;
+let listenSendError: UnlistenFn | null = null;
+let listenReceiveError: UnlistenFn | null = null;
 let listenSendProgress: UnlistenFn | null = null;
 let listenStatus: UnlistenFn | null = null;
 let listenCode: UnlistenFn | null = null;
@@ -164,14 +172,20 @@ async function receiveText() {
 onMounted(async () => {
   savePath.value = await homeDir();
 
-  listenError = await listen("croc-error", (event) => {
+  listenSendError = await listen("croc-send-error", (event) => {
     const message = event.payload as emitInfo;
     alert("Code: "+message.croc_code+"\n\n"+message.info);
     //isSending.value = false;
     if(isWaiting(message.croc_code)){
       deleteCode(message.croc_code);
     }
-    console.error("File transfer error:", message);
+    console.error("croc send error:", message);
+  });
+  listenReceiveError = await listen("croc-receive-error", (event) => {
+    const message = event.payload as string;
+    //alert("Code: "+message.croc_code+"\n\n"+message.info);
+    alert(message);
+    console.error("croc send error:", message);
   });
   listenCode = await listen("croc-code", (event) => {
     const code = event.payload as string;
@@ -290,18 +304,39 @@ onMounted(async () => {
     }
   });
 
+  interface versionInfo {
+    tag_name:string,
+    body:string
+  }
+  try {
+      curVersion.value = await getVersion();
+      curVersion.value="v"+curVersion.value;
+
+      let latest = await invoke('check_update') as versionInfo;
+      latestVersion.value = latest.tag_name;
+      latestVersionDesc.value = latest.body;
+
+      console.log(latest);
+      // if(curVersion.value.toLowerCase()  < latestVersion.value.toLowerCase()){
+      //     //alert("有新版本发布！\n当前版本："+curVersion.value+"，最新版本："+latestVersion.value+"\n请前往 https://gitee.com/vvvvvx/fast-full-text-search/releases 下载最新版本。");
+      //     getById("alertNewVersionBox").style.display="block";
+      // }
+  } catch (e) {
+      console.log(e);
+  }
 
 });
 
 watch(chatText,async ()=>{
   await nextTick(); //等待TextArea渲染
-  if (chatText.value){
+  if (chatText.value && chatArea.value){
     chatArea.value.scrollTop=chatArea.value.scrollHeight;
   }
 });
 
 onBeforeUnmount(() => {
-  listenError?.();
+  listenSendError?.();
+  listenReceiveError?.();
   listenSendProgress?.();
   listenStatus?.();
   listenCode?.();
@@ -322,7 +357,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main class="container-fluid p-4 pt-2" style="z-index:1000;" >
+  <main class="container-fluid p-4 pt-2" style="z-index:1000; " >
     <div class="row mb-0 align-items-end" >
       <!-- nav tabs -->
       <div class="col-5 mb-0" style="margin-bottom:0px;padding-bottom:0px;" >
@@ -392,7 +427,7 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
                       <button class="btn btn-warning" @click="sendFiles"  :disabled="!sendPaths || sendPaths.length === 0 || isSending">发送/Send</button>
                     </span>
                   </div>
-                  <div class="col-12 mb-0 mt-0">
+                  <div class="col-12 mb-0 mt-0" v-show="receivePaths.length>0">
                     <span>状态/Status &nbsp;: &nbsp;</span>
                     <span style="color:lightgreen;" v-show="sendPaths.length>0">{{  sendStatus   }}</span>
                   </div>
@@ -443,9 +478,9 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
                       <button class="btn btn-warning" @click="receiveFiles">接收/Receive</button>
                     </span>
                   </div>
-                  <div class="col-12 mb-0 mt-0 " style="margin-top:0px;">
+                  <div class="col-12 mb-0 mt-0 " v-show="receivePaths.length>0" style="margin-top:0px;">
                     <span>状态/Status &nbsp;: &nbsp;</span>
-                    <span style="color:lightgreen;" v-show="receivePaths.length>0">{{  receiveStatus   }}</span>
+                    <span style="color:lightgreen;" >{{  receiveStatus   }}</span>
                   </div>
                 </div>
               </div>
@@ -484,7 +519,7 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
           <div class="header-area p-3 " >
             <div class="row">
               <div class="col-9">
-                <textarea class="form-control pl-0 " v-model="inputText" style="border::1px solid #ddd;height:80px; resize:none;" placeholder="在这里输入消息/Enter message here" >
+                <textarea class="form-control pl-0 " v-model="inputText" style="border::1px solid #ddd;height:83px; resize:none;" placeholder="在这里输入消息/Enter message here" >
                 </textarea>
               </div>
               <div class="col-3 mb-0 justify-content-end" style="display:flex; ">
@@ -492,7 +527,7 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
                   <div class="col-12 mb-2">
                     <span class="m-0 p-0 flex " style="float:right;" 
                       title="发送文字后把Code告知对方以接收。&#10;接收完成前不能继续发送。&#10;After sending the message,inform the recipient of the Code so they can receive it.&#10;Cannot send again until the recipient has finished receiving it.">
-                      <button class="btn btn-warning" @click="sendText" style="width:120px;" :disabled="!inputText || inputText.trim().length === 0 || isSending">发送/Send</button>
+                      <button class="btn btn-warning" @click="sendText" style="width:115px;" :disabled="!inputText || inputText.trim().length === 0 || isSending">发送/Send</button>
                     </span>
                   </div>
 
@@ -517,6 +552,17 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
       </div>
     </div>
 
+    <div class="  text-white">
+        <div class="row justify-content-end">
+            <div class="col-auto">
+            <span title="点我访问软件主页，可提Bug或建议。"> 
+              <a href="https://gitee.com/vvvvvx/croc-gui" style="color:inherit;text-decoration:none;" target="_blank">Developed by Viaco.</a>&emsp; Email : 106324221@qq.com&emsp;
+            </span>
+            <span :class="[(curVersion < latestVersion && latestVersion!='') ?  'blink':'']" v-html="versionText" :title="versionTitle">
+            </span>
+        </div>
+        </div>
+    </div>
       <!-- Bootstrap JS (with Popper) -->
   </main>
 </template>
