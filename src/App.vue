@@ -74,6 +74,9 @@ const chatArea=ref<HTMLTextAreaElement | null>(null); //聊天窗口TextArea
 const tempPaths = ref<fileItem[]>([]); //在发送文件时，在生成code之前，临时保存文件列表。
 const dropdownCodesListOpen = ref(false);
 const codesList = ref(["1111111","2222222","3333333"]); //下拉框显示内容
+//const inputCodeRef = ref<HTMLElement | null>(null);
+const wrapperRef = ref<HTMLElement | null>(null);
+
 const sendPaths= computed<fileItem[]>(()=> {// Selected file or folder paths to send
   //if(tempPaths.value.length>0){
   //  return tempPaths.value;
@@ -148,8 +151,11 @@ function closeDropdown() {
 // 点击外部关闭下拉
 const clickOutsideHandler = (event: MouseEvent) => {
   const target = event.target as HTMLElement;
-  if (!target.closest(".dropdown-wrapper")) {
-    closeDropdown();
+  //const clickedInsideInput = inputCodeRef.value?.contains(target);
+  //const clickedInsideDropdown = dropdownRef.value?.contains(target);
+  //if (!clickedInsideInput && !clickedInsideDropdown) {
+  if (wrapperRef.value && !wrapperRef.value.contains(target)) {
+    dropdownCodesListOpen.value = false;
   }
 }
 function toggleFileMode() {
@@ -584,21 +590,21 @@ onBeforeUnmount(() => {
           </li>
         </ul>
       </div>
-      <div class="col-7 mb-2 justify-content-end" style="margin-bottom:0px;padding-bottom:0px;">
+      <div class="col-7 mb-2 justify-content-end" ref="wrapperRef" style="margin-bottom:0px;padding-bottom:0px; position:relative">
         <div class="input-group mb-0 mt-0" style="width:400px; float:right;">
           <span class="input-group-text text-white bg-secondary" id="basic-addon2">Code</span>
 
-            <input type="text" class="form-control " v-model="crocCode" @focus="openDropdown"
-            title="发送时，可输入自定义或留空自动生成传输代码&#10;接收时，输入对方的传输代码&#10;连续或来回传输时，可保持Code不变
+          <input type="text" ref="inputCodeRef" class="form-control " v-model="crocCode" @focus="openDropdown"
+          title="发送时，可输入自定义或留空自动生成传输代码&#10;接收时，输入对方的传输代码&#10;连续或来回传输时，可保持Code不变
 When sending,enter custom Code or leave it blank to generate Code automatically.
 When receiving,enter the Code provided by other side.&#10;When transmitting continuously or back and forth,the Code can be kept unchanged." 
-            placeholder="">
-          </div>
-          <ul v-show="dropdownCodesListOpen" class="list-group position-absolute w-100" style="z-index: 100; top: 100%; left: 0;">
-            <li v-for="code in codesList" :key="code" @click="selectCode(code)" class="list-group-item list-group-item-action" style="cursor: pointer;">
-              {{ code }}
-            </li>
-          </ul>
+          placeholder="">
+        </div>
+        <ul v-show="dropdownCodesListOpen" ref="dropdownRef" class="list-group position-absolute w-100" style="z-index: 9001; top: 100%; left: 0;">
+          <li v-for="code in codesList" :key="code" @click="selectCode(code)" class="list-group-item list-group-item-action" style="cursor: pointer;">
+            {{ code }}
+          </li>
+        </ul>
       </div>
     </div>
     <!-- tab content -->
@@ -783,7 +789,7 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
   </main>
 </template>
 
-<style >
+<style scoped>
     /* 美化 tab 样式 */
     .nav-tabs  {
       border-bottom: none;
