@@ -23,9 +23,25 @@ interface emitProgress{
   croc_code:string,
   files:fileItem[]
 }
-interface emitStatus{
+interface txtMsg{
   croc_code:string,
-  status:string
+  type: string,// To or From
+  timestamp: string,
+  msg:string
+}
+// 文件传输类
+interface fileProcess{
+  croc_code:string,
+  memo:string, // mark the code to who
+  type: string,// send or receive
+  files:fileItem[],
+}
+// 文本发送类
+interface chatProcess{
+  croc_code:string,
+  memo:string, // mark the code to who
+  msgList:txtMsg[],
+
 }
 
 const curVersion=ref(''); //当前版本号
@@ -34,10 +50,12 @@ const latestVersionDesc=ref(''); //最新版本描述
 const versionText=computed(()=>{return ((curVersion.value.toLowerCase() < latestVersion.value.toLowerCase()) && latestVersion.value!='') ?  `<a href="https://gitee.com/vvvvvx/croc-gui/releases" target="_blank" style="text-decoration:none;color:green;">有新版本/New version available.</a>`:`<a href="https://gitee.com/vvvvvx/croc-gui/releases" target="_blank" style="text-decoration:none;color:white;">Version: ${curVersion.value}</a>` ;}); //版本号显示文本
 const versionTitle=computed(()=>{return ((curVersion.value.toLowerCase() < latestVersion.value.toLowerCase()) && latestVersion.value!='') ? `当前版本：${curVersion.value}  最新版本：${latestVersion.value} \n\n新版本更新：\n${latestVersionDesc.value}`:"点击我查看版本更新信息。"}); //版本号鼠标悬停提示
 
+const typeSend=ref("Send")
+const typeReceive=ref("Receive")
 const isFolder = ref(false); // File or Folder mode
-const isFileTransfer= ref(true); //FileTransfer or TextChat
-const sendPaths=ref<fileItem[]>([]); // Selected file or folder paths to send
-const receivePaths=ref<fileItem[]>([]); // received file or folder paths 
+//const isFileTransfer= ref(true); //FileTransfer or TextChat
+//const sendPaths=ref<fileItem[]>([]); // Selected file or folder paths to send
+//const receivePaths=ref<fileItem[]>([]); // received file or folder paths 
 const crocCode = ref<string>(""); // Croc code for transfer
 const waitingCodesList = ref<string[]>([]); //Croc codes which are waiting for receiving
 const savePath=ref<string>(""); // Application directory path
@@ -46,7 +64,23 @@ const receiveStatus=ref<string>(""); // Overall receive status
 const isSending=ref<boolean>(false); // Whether currently sending files
 const chatText=ref<string>("");
 const inputText=ref<string>(""); // text to send
+const fileProcessList = ref<fileProcess[]>([]); // for multi sending
+const chatProcessList = ref<chatProcess[]>([]); // for multi chatting
 const chatArea=ref<HTMLTextAreaElement | null>(null); //聊天窗口TextArea
+
+const sendPaths= computed<fileItem[]>(()=> {
+  const progress=fileProcessList.value.find(
+    p => p.croc_code === crocCode.value && p.type= typeSend
+  );
+  return process ? process.files : [];
+}); // Selected file or folder paths to send
+const receivePaths= computed<fileItem[]>(() => {
+  const progress=fileProcessList.value.find(
+    p => p.croc_code === crocCode.value && p.type= typeReceive
+  );
+  return process ? process.files : [];
+
+}); // received file or folder paths 
 
 
 let listenSendError: UnlistenFn | null = null;
@@ -71,7 +105,7 @@ async function selectFile() {
   const selected = await open({
     multiple: true,
     directory: isFolder.value,
-    title: isFileTransfer ? "选择目录/Select Folders":"选择文件/Select files",
+    title: isFolder.value ? "选择目录/Select Folders":"选择文件/Select files",
   });
   if (Array.isArray(selected)) {
     sendPaths.value = selected.map((path) => ({ file: path, status: "待发送/Pending" ,is_dir: isFolder.value }));
@@ -103,6 +137,79 @@ function getTime():string{
   return new Date().toLocaleString();
   
 }
+// message funciton --->
+
+
+// 添加消息
+function msgAdd(code:string,msg:string,fromOrTo:string){
+  //查找会话
+  const exist= chatProcessList.value.find( c => c.croc_code == code);
+  const newMsg: txtMsg ={
+      croc_code:code,
+      type: fromOrTo,// To or From
+      timestamp: getTime(),
+      msg:msg
+  }
+  if (exist){
+    exist.msgList.push( newMsg );
+  }else{
+    alert("错误：记录聊天消息时，找不到对应聊天会话。")
+  }
+  
+}
+// 更新最后一条发送信息是否已收到。
+function msgUpdateLastMsgStatus(code:string){
+  const exist= chatProcessList.value.find( c => c.croc_code == code);
+  if(!exist){
+    alert("错误：更新聊天记录状态时，找不到对应聊天会话");
+    return;
+  }
+  const msg=exist.msgList.findLast(c => c.croc_code==code && c.type=="To");
+  if (!msg){
+    alert("错误：更新聊天记录状态时，找不到对应聊天消息");
+    return;
+  }
+  msg.msg += " (Received)";
+}
+function msgAddProcess(code:string,memo:string){
+  const exist= chatProcessList.value.find( c => c.croc_code == code);
+  if(!exist){
+    chatProcessList.value.push({
+      croc_code:code,
+      memo:memo,
+      msgList:[]
+    })
+  }
+  
+}
+
+// <-------message funciton 
+
+// file transfer function ------->
+function fileTransProcessUpdate(code:string,type:string,files:fileItem[]){
+  
+  const exist= fileProcessList.value.find( c => c.croc_code == code && c.type==type);
+  if(!exist){
+    alert("错误：更新文件传输态时，找不到对应进程信息");
+    return;
+  }
+  exist.files=files;
+}
+function fileTransProcessAdd(code:string,type:string,memo:string){
+  
+  const exist= fileProcessList.value.find( c => c.croc_code == code && c.type==type);
+  if(!exist){
+    fileProcessList.value.push({
+      croc_code:code,
+      type:type,
+      memo:memo,
+      files:[]
+    })
+  }
+}
+
+// <--------file transfer function
+
 async function selectSaveFolder() {
   const selected = await open({
     multiple: false,
@@ -152,12 +259,12 @@ async function sendText() {
     alert("请输入发送文本。\nEnter text first.");
     return;
   }
-  if(crocCode.value.trim()!=="" && isWaiting(crocCode.value)) {
+  if(crocCode.value.trim()!=="" && isWaiting(crocCode.value.trim())) {
     alert("Code: "+ crocCode.value+"\n\n最后一次发送的消息对方还未接收，等待接收完成。\nThe last sent msg has not been received.\nWaiting for the reception to complete.")
     return;
   }
 
-  if(crocCode.value.trim()!=="" && !isWaiting(crocCode.value)) {
+  if(crocCode.value.trim()!=="" && !isWaiting(crocCode.value.trim())) {
     waitingCodesList.value.push(crocCode.value);
   }
   await invoke("send_text", { msg:inputText.value, code: crocCode.value });
@@ -199,9 +306,9 @@ onMounted(async () => {
   listenSendProgress = await listen("croc-send-file-progress", (event) => {
     const progress = event.payload as emitProgress; 
     // 是当前传输进程才更新，否则会混乱。
-    if (crocCode.value===progress.croc_code){
+    //if (crocCode.value===progress.croc_code){
       sendPaths.value = progress.files;
-    }
+    //}
     console.log("Send progress update:", sendPaths.value);
     /*
     const payload = event.payload as { file: string; status: string };
@@ -211,10 +318,10 @@ onMounted(async () => {
     }*/
   });
   listenStatus = await listen("croc-send-file-status", (event) => {
-    const status = event.payload as emitStatus;
-    if (crocCode.value===status.croc_code){
-      sendStatus.value = status.status;
-    }
+    const status = event.payload as emitInfo;
+    //if (crocCode.value===status.croc_code){
+      sendStatus.value = status.info;
+    //}
     console.log("Overall status update:", sendStatus.value);
 
   });
@@ -237,7 +344,7 @@ onMounted(async () => {
       }
 
     }
-
+    sendStatus.value="All sent"
     console.log("Croc send done:", message);
   });
   listenSendFileSuccess = await listen("croc-send-file-success", (event) => {
@@ -247,6 +354,7 @@ onMounted(async () => {
     if(isWaiting(message.croc_code)){
       deleteCode(message.croc_code);
     }
+    sendStatus.value="All sent"
     console.log("Croc send success:", message);
   });
   listenReceiveFileProgress = await listen("croc-receive-file-progress", (event) => {
@@ -256,9 +364,11 @@ onMounted(async () => {
   listenReceiveFileDone = await listen("croc-receive-file-done", (event) => {
     const message = event.payload as string;
     console.log("Croc receive done:", message);
+    receiveStatus.value="Received all"
   });
   listenReceiveFileSuccess = await listen("croc-receive-file-success", (event) => {
     const message = event.payload as string;
+    receiveStatus.value="Received all"
     alert(message);
     console.log("Croc receive success:", message);
   });
@@ -268,39 +378,41 @@ onMounted(async () => {
   });
   listenSendTextCode = await listen("croc-send-text-code", (event) => {
     const code = event.payload as string;
-    crocCode.value = code;
-    if(!isWaiting(code)){
-      waitingCodesList.value.push(code);
+    crocCode.value = code.trim();
+    if(!isWaiting(code.trim())){
+      waitingCodesList.value.push(code.trim());
     }
-    chatText.value += "[To:] "+getTime()+" ["+code+"]\n"+inputText.value;
+    chatText.value += "\n[To:] "+getTime()+" ["+code+"]\n"+inputText.value;
     inputText.value="";
     console.log("Received croc code:", crocCode.value);
   });
   listenSendTextSuccess = await listen("croc-send-text-success", (event) => {
     const message = event.payload as emitInfo;
-    chatText.value += " (Received)\n\n"; //sendStatus.value+"-["+message.croc_code+"]\n"+message.info+"\n";
+    if (crocCode.value===message.croc_code){
+      chatText.value += " (Received)\n"; //sendStatus.value+"-["+message.croc_code+"]\n"+message.info+"\n";
+    }
     if (isWaiting(message.croc_code)){
       deleteCode(message.croc_code);
     }
     console.log("Croc receive success:", message);
   });
   listenSendTextStatus = await listen("croc-send-text-status",(event)=>{
-    const message = event.payload as emitStatus;
+    const message = event.payload as emitInfo;
     if(message.croc_code===crocCode.value){
-      sendStatus.value=message.status;
+      sendStatus.value=message.info;
     }
   });
   listenReceiveTextStatus = await listen("croc-receive-text-status",(event)=>{
-    const message = event.payload as emitStatus;
+    const message = event.payload as emitInfo;
     if(message.croc_code===crocCode.value){
-      sendStatus.value=message.status;
+      sendStatus.value=message.info;
     }
   });
   listenReceiveTextMsg = await listen("croc-receive-text-msg",(event)=>{
     const message = event.payload as emitInfo;
     //alert(message.info);
     if(message.croc_code===crocCode.value){
-      chatText.value += "[From:] "+getTime()+" ["+message.croc_code+"]\n"+ message.info+"\n\n";
+      chatText.value += "\n[From:] "+getTime()+" ["+message.croc_code+"]\n"+ message.info+"\n";
     }
   });
 
@@ -427,7 +539,7 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
                       <button class="btn btn-warning" @click="sendFiles"  :disabled="!sendPaths || sendPaths.length === 0 || isSending">发送/Send</button>
                     </span>
                   </div>
-                  <div class="col-12 mb-0 mt-0" v-show="receivePaths.length>0">
+                  <div class="col-12 mb-0 mt-0" v-show="sendPaths.length>0">
                     <span>状态/Status &nbsp;: &nbsp;</span>
                     <span style="color:lightgreen;" v-show="sendPaths.length>0">{{  sendStatus   }}</span>
                   </div>

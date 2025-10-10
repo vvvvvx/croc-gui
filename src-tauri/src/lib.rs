@@ -23,23 +23,27 @@ static RE_CODE: Lazy<regex::Regex> = Lazy::new(|| {
 static RE_HASHING: Lazy<Regex> = Lazy::new(|| {
     //Regex::new(r"Hashing\s+([^\s%]+)\s*(\d+)%\s*\|([^|]+)\|\s*\((\d*\.?\d*)\s*MB/s\)\s*\[(\d+)(s|m|month|year):(\d+)\5\]")
     //(Hashing)   (文件名)   (百分比)  (进度条)               (速度)         (时间1 单位 : 时间2 单位)
-    Regex::new(r"(Hashing)\s+([^\s%]+)\s*(\d+%)\s*\|([^|]*)\|\s*(\(\d+\.?\d*\s+[a-zA-Z]+/s\))\s+(\[\d+\.?\d*[a-zA-Z]+:\d+\.?\d*[a-zA-Z]+\])")
+    //Regex::new(r"(Hashing)\s+([^\s%]+)\s*(\d+%)\s*\|([^|]*)\|\s*(\(\d+\.?\d*\s+[a-zA-Z]+/s\))\s+(\[\d+\.?\d*[a-zA-Z]+:\d+\.?\d*[a-zA-Z]+\])")
+    Regex::new(r"(Hashing)\s+([^\s%]+)\s*(\d+%)\s*\|([^|]*)\|\s*(\([\d\s\.A-Za-z]+/[a-zA-Z]\))\s+(\[[\da-zA-Z]+:[\da-zA-Z]+\])")
         .expect("Invalid regex for Hashing")
 });
 
 static RE_SENDING: Lazy<Regex> = Lazy::new(|| {
     //Regex::new(r"([^\s%]+)\s*(\d+)%\s*\|([^|]+)\|\s*\((\d*\.?\d*)/(\d*\.?\d*)\s*MB,\s*(\d*\.?\d*)\s*MB/s\)\s*\[(\d+)(s|m|month|year):(\d+)\7\]")
     //(文件名)   (百分比)  (进度条)               (已发送/总大小    速度)         (时间1 单位 : 时间2 单位)
-    Regex::new(r"([^\s%]+)\s*(\d+%)\s*\|([^|]*)\|\s*(\(\d+\.?\d*/\d+\.?\d*\s+[a-zA-Z]+,\s+\d+\.?\d*\s[a-zA-Z]+/s\))\s+(\[\d+\.?\d*[a-zA-Z]+:\d+\.?\d*[a-zA-Z]+\])")
+    Regex::new(r"([^\s%]+)\s*(\d+%)\s*\|([^|]*)\|\s*(\([\d/\.\sA-Za-z]+/[\d/\.\sA-Za-z]+,[\d\s\.A-Za-z]+/[a-zA-Z]\))\s+(\[[\da-zA-Z]+:[\da-zA-Z]+\])")
         .expect("Invalid regex for Sending")
 });
 static RE_COMPLETED: Lazy<Regex> = Lazy::new(|| {
     //(文件名)   (百分比)  (进度条)               (已发送/总大小    速度)
-    Regex::new(r"([^\s%]+)\s*(\d+%)\s*\|([^|]*)\|\s*(\(\d+\.?\d*/\d+\.?\d*\s+[a-zA-Z]+,\s+\d+\.?\d*\s[a-zA-Z]+/s\))")
+    // Regex::new(r"([^\s%]+)\s*(\d+%)\s*\|([^|]*)\|\s*(\(\d+\.?\d*/\d+\.?\d*\s+[a-zA-Z]+,\s+\d+\.?\d*\s[a-zA-Z]+/s\))")
+    //Regex::new(r"([^\s%]+)\s*(\d+%)\s*\|([^|]*)\|\s*(\([\d/\.\sA-Za-z]+,[\d/\.\sA-Za-z]+\))")
+    Regex::new(r"([^\s%]+)\s*(\d+%)\s*\|([^|]*)\|\s*(\([\d/\.\sA-Za-z]+/[\d/\.\sA-Za-z]+,[\d\s\.A-Za-z]+/[a-zA-Z]\))")
         .expect("Invalid regex for Completed")
 });
 static RE_RECEIVE_MSG: Lazy<Regex> = Lazy::new(|| {
-    //(文件名)   (百分比)  (进度条)               (已发送/总大小    速度)
+    // Receiving (<-125.70.11.136:50824)
+    // 以上行开头，下行开始才是消息内容
     Regex::new(r"(Receiving\s+\(<\-\d+\.\d+\.\d+\.\d+:\d+\)|Sending\s+\(\->\d+\.\d+\.\d+\.\d+:\d+\))[\n\r]+([^\s%]+([\n\r]*[^\s%])*)")
         .expect("Invalid regex for ReceiveMsg")
 });
@@ -93,7 +97,7 @@ fn get_text_msg(text: &str) -> Option<String> {
         .captures(text)
         .and_then(|caps| caps.get(2).map(|m| m.as_str().to_string()))
 }
-fn get_progress_data(text: &str) -> Option<ProgressData> {
+fn get_progress_data(text: &str, receive_or_send: &str) -> Option<ProgressData> {
     // 尝试匹配Hashing格式1
     if let Some(caps) = RE_HASHING.captures(text) {
         return Some(ProgressData {
@@ -109,7 +113,7 @@ fn get_progress_data(text: &str) -> Option<ProgressData> {
     // 尝试匹配Sending格式2
     if let Some(caps) = RE_SENDING.captures(text) {
         return Some(ProgressData {
-            progress_type: "Sending".to_string(),
+            progress_type: receive_or_send.to_string(),
             filename: caps[1].to_string(),
             percentage: caps[2].to_string(),
             progress_bar: caps[3].to_string(),
@@ -172,15 +176,14 @@ fn get_direct_files(path: &str) -> Result<Vec<FileItem>, std::io::Error> {
 fn insert_files_after_dir(files: Vec<FileItem>) -> Vec<FileItem> {
     let mut result: Vec<FileItem> = Vec::new();
     for file in files.iter() {
-        result.push(file.clone());
+        // result.push(file.clone());
         if is_dir(&file.file) {
             if let Ok(mut dir_files) = get_direct_files(&file.file) {
                 result.append(&mut dir_files);
             }
+        } else {
+            result.push(file.clone());
         }
-        // else{
-        //     result.push(file.clone());
-        // }
     }
     result
 }
@@ -237,12 +240,11 @@ struct EmitProgress {
     croc_code: String,
     files: Vec<FileItem>,
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct EmitStatus {
-    croc_code: String,
-    status: String,
-}
-
+// #[derive(Debug, Clone, Serialize, Deserialize)]
+// struct EmitStatus {
+//     croc_code: String,
+//     status: String,
+// }
 #[tauri::command]
 async fn send_files(
     window: tauri::Window,
@@ -356,10 +358,10 @@ async fn send_files(
                         if let Some(status) = get_status(&output) {
                             // println!("Extracted status: {}", status);
                             window
-                                .emit("croc-send-file-status", Some(EmitStatus{croc_code:code_str.clone(),status: status.to_string()}))
+                                .emit("croc-send-file-status", Some(EmitInfo{croc_code:code_str.clone(),info: status.to_string()}))
                                 .unwrap();
                         }
-                        if let Some(progress_data) = get_progress_data(&output) {
+                        if let Some(progress_data) = get_progress_data(&output,"Sending") {
                             // println!("Extracted progress data: {:?}", progress_data);
                             let status_str = if progress_data.progress_type=="Hashing"{
                                 format!(
@@ -435,10 +437,10 @@ async fn send_files(
                         if let Some(status) = get_status(&output) {
                             // println!("Extracted status: {}", status);
                             window
-                                .emit("croc-send-file-status", Some(EmitStatus{croc_code:code_str.clone(),status: status.to_string()}))
+                                .emit("croc-send-file-status", Some(EmitInfo{croc_code:code_str.clone(),info: status.to_string()}))
                                 .unwrap();
                         }
-                        if let Some(progress_data) = get_progress_data(&output) {
+                        if let Some(progress_data) = get_progress_data(&output,"Sending") {
                             // println!("Extracted progress data: {:?}", progress_data);
                             let status_str = format!(
                                 "{}: {} {} {}",
@@ -598,7 +600,7 @@ async fn receive_files(
                                 .emit("croc-receive-error", Some("远程响应错误，可能是对方连续用相似的自定义Code，\n建议让对方用自动生成Code的方式重发。\n\nRemote response error, possibly because the sender\nrepeatedly used similar custom Codes. \nIt is recommended to have them resend using \nautomatically generated Codes.".to_string()))
                                 .unwrap();
                         }
-                        if let Some(progress_data) = get_progress_data(&output) {
+                        if let Some(progress_data) = get_progress_data(&output,"Receiving") {
                             // println!("Extracted progress data: {:?}", progress_data);
                             let status_str = format!(
                                 "{}: {} {} {}",
@@ -658,7 +660,7 @@ async fn receive_files(
                                 .emit("croc-receive-error", Some("无内容可接收或Code冲突,等待或换个Code重试。\nNo content to receive or Code conflict,waiting or change the Code.".to_string()))
                                 .unwrap();
                         }
-                        if let Some(progress_data) = get_progress_data(&output) {
+                        if let Some(progress_data) = get_progress_data(&output,"Receiving") {
                             // println!("Extracted progress data: {:?}", progress_data);
                             let status_str = format!(
                                 "{}: {} {} {}",
@@ -815,7 +817,7 @@ async fn send_text(
                         if let Some(status) = get_status(&output) {
                             // println!("Extracted status: {}", status);
                             window
-                                .emit("croc-send-text-status", Some(EmitStatus{croc_code:code_str.clone(),status: status.to_string()}))
+                                .emit("croc-send-text-status", Some(EmitInfo{croc_code:code_str.clone(),info: status.to_string()}))
                                 .unwrap();
                         }
                         if output.contains("not enough open ports") {
@@ -856,7 +858,7 @@ async fn send_text(
                         if let Some(status) = get_status(&output) {
                             // println!("Extracted status: {}", status);
                             window
-                                .emit("croc-send-text-status", Some(EmitStatus{croc_code:code_str.clone(),status: status.to_string()}))
+                                .emit("croc-send-text-status", Some(EmitInfo{croc_code:code_str.clone(),info: status.to_string()}))
                                 .unwrap();
                         }
                         if output.contains("not enough open ports") {
@@ -881,7 +883,7 @@ async fn send_text(
         // if let Some(status) = get_status(&full_output) {
         //     // println!("Extracted status: {}", status);
         //     window
-        //         .emit("croc-send-text-status", Some(EmitStatus{croc_code:code_str.clone(),status: status.to_string()}))
+        //         .emit("croc-send-text-status", Some(EmitInfo{croc_code:code_str.clone(),info: status.to_string()}))
         //         .unwrap();
         // }
         let status = child.wait().expect("Command wasn't running");
@@ -969,7 +971,7 @@ async fn receive_text(
                         if let Some(status) = get_status(&output) {
                             // println!("Extracted status: {}", status);
                             window
-                                .emit("croc-receive-text-status", Some(EmitStatus{croc_code:code_str.clone(),status: status.to_string()}))
+                                .emit("croc-receive-text-status", Some(EmitInfo{croc_code:code_str.clone(),info: status.to_string()}))
                                 .unwrap();
                         }
                         if let Some(msg) = get_text_msg(&output) {
@@ -1012,7 +1014,7 @@ async fn receive_text(
                         if let Some(status) = get_status(&output) {
                             // println!("Extracted status: {}", status);
                             window
-                                .emit("croc-receive-text-status", Some(EmitStatus{croc_code:code_str.clone(),status: status.to_string()}))
+                                .emit("croc-receive-text-status", Some(EmitInfo{croc_code:code_str.clone(),info: status.to_string()}))
                                 .unwrap();
                         }
                         if let Some(msg) = get_text_msg(&output) {
@@ -1052,7 +1054,7 @@ async fn receive_text(
         // if let Some(status) = get_status(&full_output) {
         //     // println!("Extracted status: {}", status);
         //     window
-        //         .emit("croc-send-text-status", Some(EmitStatus{croc_code:code_str.clone(),status: status.to_string()}))
+        //         .emit("croc-send-text-status", Some(EmitInfo{croc_code:code_str.clone(),info: status.to_string()}))
         //         .unwrap();
         // }
         let status = child.wait().expect("Command wasn't running");
