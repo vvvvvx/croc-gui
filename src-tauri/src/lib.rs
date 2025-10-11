@@ -44,7 +44,7 @@ static RE_COMPLETED: Lazy<Regex> = Lazy::new(|| {
 static RE_RECEIVE_MSG: Lazy<Regex> = Lazy::new(|| {
     // Receiving (<-125.70.11.136:50824)
     // 以上行开头，下行开始才是消息内容
-    Regex::new(r"(Receiving\s+\(<\-\d+\.\d+\.\d+\.\d+:\d+\)|Sending\s+\(\->\d+\.\d+\.\d+\.\d+:\d+\))[\n\r]+([^\s%]+([\n\r]*[^\s%])*)")
+    Regex::new(r"(Receiving\s+\(<\-\d+\.\d+\.\d+\.\d+:\d+\)|Sending\s+\(\->\d+\.\d+\.\d+\.\d+:\d+\))[\n\r\s]+([^\s%]+([\n\r\s]*[^\s%])*)")
         .expect("Invalid regex for ReceiveMsg")
 });
 
@@ -351,7 +351,7 @@ async fn send_files(
                                 .emit("croc-send-file-progress", Some(EmitProgress{croc_code:code_str.clone(),files: files.clone()}))
                                 .unwrap();
                             window
-                                .emit("croc-send-file-ready", Some(EmitInfo{croc_code:code_str.clone(),info: "文件已准备好，请把Code给对方以开始接收。\nFiles ready to send,provide the Code to recipient to receive.".to_string()}))
+                                .emit("croc-send-file-ready", Some(EmitInfo{croc_code:code_str.clone(),info: "文件已准备好，请把Code给对方以开始接收。\nFiles ready,provide the Code to recipient to receive.".to_string()}))
                                 .unwrap();
                         }
 
@@ -430,7 +430,7 @@ async fn send_files(
                                 .emit("croc-send-file-progress", Some(EmitProgress{croc_code:code_str.clone(),files: files.clone()}))
                                 .unwrap();
                             window
-                                .emit("croc-send-file-ready", Some(EmitInfo{croc_code:code_str.clone(),info: "文件已准备好，请把Code给对方以开始接收。\nFiles ready to send,provide the Code to recipient to receive.".to_string()}))
+                                .emit("croc-send-file-ready", Some(EmitInfo{croc_code:code_str.clone(),info: "文件已准备好，请把Code给对方以开始接收。\nFiles ready,provide the Code to recipient to receive.".to_string()}))
                                 .unwrap();
 
                         }
@@ -550,6 +550,7 @@ async fn receive_files(
     // 启动 croc 进程
     println!("Running croc with args: {croc_args:?}");
     let code2 = code.clone();
+    let code_str = code2.clone();
     let mut files: Vec<FileItem> = vec![];
     tokio::task::spawn_blocking(move || {
 
@@ -587,12 +588,12 @@ async fn receive_files(
                         if let Some(status) = get_status(&output) {
                             // println!("Extracted status: {}", status);
                             window
-                                .emit("croc-receive-file-status", Some(status.to_string()))
+                                .emit("croc-receive-file-status", Some(EmitInfo{croc_code:code_str.clone(),info: status.to_string()}))
                                 .unwrap();
                         }
                         if output.contains("(secure channel) not ready") {
                             window
-                                .emit("croc-receive-error", Some("无内容可接收或Code冲突,等待或换个Code重试。\nNo content to receive or Code conflict,waiting or change the Code.".to_string()))
+                                .emit("croc-receive-error", Some("无内容可接收或Code冲突,等会儿再试或换个Code重试。\nNo content to receive or Code conflict,waiting or change the Code.".to_string()))
                                 .unwrap();
                         }
                         if output.contains("room full") {
@@ -622,7 +623,7 @@ async fn receive_files(
                             // println!("files: {:?}", files);
                             // 发送更新后的文件状态列表到前端
                             window
-                                .emit("croc-receive-file-progress", Some(files.clone()))
+                                .emit("croc-receive-file-progress", Some(EmitProgress{croc_code:code_str.clone(),files: files.clone()}))
                                 .unwrap();
                         }
                         if output.contains("not enough open ports") {
@@ -652,12 +653,12 @@ async fn receive_files(
                         if let Some(status) = get_status(&output) {
                             // println!("Extracted status: {}", status);
                             window
-                                .emit("croc-receive-file-status", Some(status.to_string()))
+                                .emit("croc-receive-file-status", Some(EmitInfo{croc_code:code_str.clone(),info: status.to_string()}))
                                 .unwrap();
                         }
                         if output.contains("(secure channel) not ready") {
                             window
-                                .emit("croc-receive-error", Some("无内容可接收或Code冲突,等待或换个Code重试。\nNo content to receive or Code conflict,waiting or change the Code.".to_string()))
+                                .emit("croc-receive-error", Some("无内容可接收或Code冲突,等会儿再试或换个Code重试。\nNo content to receive or Code conflict,waiting or change the Code.".to_string()))
                                 .unwrap();
                         }
                         if let Some(progress_data) = get_progress_data(&output,"Receiving") {
@@ -682,7 +683,7 @@ async fn receive_files(
                             // println!("files: {:?}", files);
                             // 发送更新后的文件状态列表到前端
                             window
-                                .emit("croc-receive-file-progress", Some(files.clone()))
+                                .emit("croc-receive-file-progress", Some(EmitProgress{croc_code:code_str.clone(),files: files.clone()}))
                                 .unwrap();
                         }
                         if output.contains("not enough open ports") {
@@ -704,11 +705,11 @@ async fn receive_files(
         if status.success() {
             // 传输完成，强制将所有文件状态更新为100%
             replace_completed_percent(&mut files);
-            window.emit("croc-receive-file-progress", Some(files.clone()))
+            window.emit("croc-receive-file-progress", Some(EmitProgress{croc_code:code_str.clone(),files: files.clone()}))
                 .unwrap();
 
             window
-                .emit("croc-receive-file-success", Some("所有文件已成功接收\nAll files received successfully".to_string()))
+                .emit("croc-receive-file-success", Some(EmitInfo{croc_code:code_str.clone(),info: "所有文件已成功接收\nAll files received successfully".to_string()}))
                 .unwrap();
         } else {
             window
@@ -988,7 +989,7 @@ async fn receive_text(
                         }
                         if output.contains("(secure channel) not ready") {
                             window
-                                .emit("croc-receive-error", Some("无内容可接收或Code冲突,等待或换个Code重试。\nNo content to receive or Code conflict,waiting or change the Code.".to_string()))
+                                .emit("croc-receive-error", Some("无内容可接收或Code冲突,等会儿再试或换个Code重试。\nNo content to receive or Code conflict,waiting or change the Code.".to_string()))
                                 .unwrap();
                         }
                         full_output+=output.as_str();
@@ -1032,7 +1033,7 @@ async fn receive_text(
                         }
                         if output.contains("(secure channel) not ready") {
                             window
-                                .emit("croc-receive-error", Some("无内容可接收或Code冲突,等待或换个Code重试。\nNo content to receive or Code conflict,waiting or change the Code.".to_string()))
+                                .emit("croc-receive-error", Some("无内容可接收或Code冲突,等会儿再试或换个Code重试。\nNo content to receive or Code conflict,waiting or change the Code.".to_string()))
                                 .unwrap();
                         }
                         full_output+=output.as_str();
@@ -1068,7 +1069,7 @@ async fn receive_text(
             window
                 .emit(
                     "croc-receive-error",
-                    Some(EmitInfo{croc_code:code_str.clone().to_string(),info: format!("Croc command failed with status: {status}")}),
+                    Some(format!("Croc command failed with status: {status}")),
                 )
                 .unwrap();
         }
