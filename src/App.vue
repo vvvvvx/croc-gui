@@ -6,7 +6,7 @@ import { homeDir } from "@tauri-apps/api/path";
 import { listen,UnlistenFn } from "@tauri-apps/api/event";
 import { getVersion } from '@tauri-apps/api/app';
 //import { ElMessageBox } from "element-plus";
-import { askUserInput,darkAlert } from "./utils/dialog";
+import { darkAlert } from "./utils/dialog";
 //import { Command } from "@tauri-apps/plugin-shell";
 //import path from "@tauri-apps/api/path";
 //import fileIcon from "./assets/file.svg";
@@ -80,7 +80,7 @@ const tempPaths = ref<fileItem[]>([]); //在发送文件时，在生成code之�
 const dropdownCodesListOpen = ref(false);
 const wrapperRef = ref<HTMLElement | null>(null);
 const Tab = (window as any).bootstrap?.Tab;
-const isAskingMemo = ref<boolean>(false); // 是否在等待用户输入memo,防止在progress事件中重复弹窗。
+//const isAskingMemo = ref<boolean>(false); // 是否在等待用户输入memo,防止在progress事件中重复弹窗。
 //const fileSendCount = computed (()=>{
 //  fileProcessList.value.filter(fp => fp.type== "FileSend").length
 //});
@@ -98,7 +98,15 @@ const receiveStatus= computed (()=>{   // current receive status
   return fp ? fp.status: "";
 });
 const fileReceiveCount = computed (()=>{
-  return fileProcessList.value.filter(fp => fp.type== "FileReceive").length;
+  return fileProcessList.value.filter(fp => fp.type== typeReceive.value).length;
+});
+
+const fileSendCount = computed (()=>{
+  return fileProcessList.value.filter(fp => fp.type== typeSend.value).length;
+});
+
+const textChatCount = computed (()=>{
+  return chatProcessList.value.length;
 });
 
 const chatText= computed<string>(()=> { // chatting records text
@@ -181,6 +189,7 @@ async function selectFile() {
     //sendPaths.value = [];
     tempPaths.value = [];
   }
+  newProcess();
   //console.log(sendPaths);
   console.log("selectFile(),tempPaths:",tempPaths.value);
 }
@@ -272,6 +281,19 @@ function toggleFileMode() {
 function toggleFolderMode() {
   isFolder.value = true;
 }
+function onClickFileSend(){
+  if (transferType.value!==typeSend.value) newProcess();
+  transferType.value=typeSend.value;
+}
+function onClickFileReceive(){
+  if (transferType.value!==typeReceive.value) newProcess();
+  transferType.value=typeReceive.value;
+}
+function onClickTextChat(){
+  if (transferType.value!==typeTextChat.value) newProcess();
+
+  transferType.value=typeTextChat.value;
+}
 function isWaiting(code:string):boolean{
   return waitingCodesList.value.includes(code);
 }
@@ -312,10 +334,6 @@ function chatGetRecords(code:string):string {
     return `[ ${t} ] ${ts}\n${msg}\n\n`;
   }).join("");
 
-//  for ( const r of exist.msgList) {
-//    text +=`[${r.type}:] ${r.timestamp} [${r.croc_code}]\n${r.msg}\n\n`;
-//  }
-//  return text;
 }
 // 添加消息
 function msgAdd(code:string,msg:string,fromOrTo:string){
@@ -509,26 +527,15 @@ onMounted(async () => {
     if(!isWaiting(code)){
       waitingCodesList.value.push(code);
     }
-    // 如果不是第一个发送任务
-    if (fileProcessList.value.length>0) {
       // 会话是否已在列表中
       if (!fileTransIsInList(code,typeSend.value)){
-        const input_memo= await askUserInput("给新任务Code起个别名，以便区别查看多任务:");
+        const input_memo=  "Send-"+(fileSendCount.value as number + 1); //await askUserInput("给新任务Code起个别名，以便区别查看多任务:");
         fileTransProcessAdd(code,typeSend.value,input_memo,tempPaths.value);
         console.log("listen croc-code,tempPaths:",tempPaths.value);
         tempPaths.value=[];
         memo.value=input_memo;
         //darkAlert(memo);
       }
-    }else{
-      //如果是第一个发送任务，则默认
-      console.log("第一个默认任务");
-      console.log("tempPaths：",tempPaths.value);
-
-      fileTransProcessAdd(code,typeSend.value,"Send[1]",tempPaths.value);
-      memo.value="Send[1]";
-      tempPaths.value=[];
-    }
     console.log("listen croc-code ,fileProcessList:", fileProcessList.value);
     console.log("Received croc code:", crocCode.value);
   });
@@ -545,23 +552,11 @@ onMounted(async () => {
     }
     // 是当前传输进程才更新，否则会混乱。
 
-    //if (crocCode.value===progress.croc_code){
-    //  sendPaths.value = progress.files;
-    //}
     console.log("Send progress update:", progress);
     console.log("fileProcessList:",fileProcessList.value);
-    /*
-    const payload = event.payload as { file: string; status: string };
-    const index = sendPaths.value.findIndex((item) => item.file === payload.file);
-    if (index !== -1) {
-      sendPaths.value[index].status = payload.status;
-    }*/
   });
   listenStatus = await listen("croc-send-file-status", (event) => {
     const st = event.payload as emitInfo;
-    //if (crocCode.value===status.croc_code){
-    //  sendStatus.value = st.info;
-    //}
 
     fileTransStatusUpdate(st.croc_code,typeSend.value,st.info);
     console.log("Send file status update:", st);
@@ -584,7 +579,6 @@ onMounted(async () => {
       if( isWaiting(message.croc_code)){
         deleteCode(message.croc_code);
       }
-
     }
 
     fileTransStatusUpdate(message.croc_code,typeSend.value,"All sent");
@@ -594,11 +588,10 @@ onMounted(async () => {
   listenSendFileSuccess = await listen("croc-send-file-success", (event) => {
     const message = event.payload as emitInfo;
     darkAlert("Code:"+message.croc_code+"\n\n"+message.info+"\n\n\n");
-    //isSending.value = false;
+    //is Sending？
     if(isWaiting(message.croc_code)){
       deleteCode(message.croc_code);
     }
-    //sendStatus.value="All sent"
 
     fileTransStatusUpdate(message.croc_code,typeSend.value,"All sent");
     console.log("Croc send success:", message);
@@ -615,30 +608,13 @@ onMounted(async () => {
     if (fileTransIsInList(pr.croc_code,typeReceive.value)){
         fileTransProcessUpdate(pr.croc_code,typeReceive.value,pr.files);
         //darkAlert(memo);
-    }else{
-      // the first task，memo is Receive[1] 
-      if(fileProcessList.value.length===0) {
-        console.log("第一个默认任务");
-        fileTransProcessAdd(pr.croc_code,typeReceive.value,"Receive[1]",pr.files);
-        memo.value="Receive[1]";
-        console.log("fileProcessList:",fileProcessList.value);
-      }else{
-
-        if(isAskingMemo.value){
-          console.log("等待上一次askUserInput()");
-          return;
-        }
-        isAskingMemo.value=true;
-        try{
+    }
+    else{
           // not the first, mark a memo.
           //const input_memo= await askUserInput("给新任务Code起个别名，以便区别查看多任务:");
-          const input_memo= "Receive["+(fileReceiveCount.value as number + 1)+"]"; // await askUserInput("给新任务Code起个别名，以便区别查看多任务:");
+          const input_memo= "Receive-"+(fileReceiveCount.value as number + 1); // await askUserInput("给新任务Code起个别名，以便区别查看多任务:");
           fileTransProcessAdd(pr.croc_code,typeReceive.value,input_memo,pr.files);
           memo.value=input_memo;
-        } finally{
-          isAskingMemo.value=false;
-        }
-      }
     }
     console.log("Receive progress update:", pr.files);
   });
@@ -667,85 +643,13 @@ onMounted(async () => {
       return;
     }
     if (!fileTransIsInList(st.croc_code,typeReceive.value)){
-      if (fileProcessList.value.length>0) {
-        if(isAskingMemo.value){
-          console.log("等待上一次askUserInput()");
-          return;
-        }
-        isAskingMemo.value=true;
-        try { 
-          const input_memo= "Receive["+(fileReceiveCount.value as number + 1)+"]"; // await askUserInput("给新任务Code起个别名，以便区别查看多任务:");
+          const input_memo= "Receive-"+(fileReceiveCount.value as number + 1); // await askUserInput("给新任务Code起个别名，以便区别查看多任务:");
           fileTransProcessAdd(st.croc_code,typeReceive.value,input_memo,[]);
           memo.value=input_memo;
-        } finally {
-          isAskingMemo.value=false;
-        }
-      }else{
-        fileTransProcessAdd(st.croc_code,typeReceive.value,"Receive[1]",[]);
-        memo.value="Receive[1]";
-      }
     }
     fileTransStatusUpdate(st.croc_code,typeReceive.value,st.info);
     console.log("Overall receive status update:", st);
   });
-/*
-  listenReceiveFileProgress = await listen("croc-receive-file-progress",async (event) => {
-    //receivePaths.value = event.payload as fileItem[]; 
-    const pr=event.payload as emitProgress;
-
-    if (pr.croc_code.trim().length===0){
-      darkAlert("错误：更新Receive file进度时，Code为空。");
-      return;
-    }
-      // 会话是否已在列表中
-    if (fileTransIsInList(pr.croc_code,typeReceive.value)){
-        fileTransProcessUpdate(pr.croc_code,typeReceive.value,pr.files);
-        return;
-        //darkAlert(memo);
-    }
-    if(isAskingMemo.value){
-      console.log("等待上一次askUserInput()");
-      return;
-    }
-    isAskingMemo.value = true;
-    try {
-      const input_memo = fileProcessList.value.length > 0 ? await askUserInput("给新任务Code起个别名，以便区别查看多任务:") : "Default";
-      fileTransProcessAdd(pr.croc_code,typeReceive.value,input_memo,pr.files);
-      memo.value=input_memo;
-    } finally{
-      isAskingMemo.value=false;
-    }
-      // the first task，memo is default
-    console.log("Receive progress update:", pr.files);
-  });
-
-
-  listenReceiveStatus = await listen("croc-receive-file-status", async(event) => {
-    const st= event.payload as emitInfo;
-    receiveStatus.value=st.info;
-    if (st.croc_code.trim().length===0){
-      darkAlert("错误：更新Receive file状态时，Code为空。");
-      return;
-    }
-    if (!fileTransIsInList(st.croc_code,typeReceive.value)){
-      if (isAskingMemo.value) {
-        console.log("等待输入中，跳过重复askUserInput");
-        return;
-      }
-      isAskingMemo.value = true;
-      try {
-        const input_memo = fileProcessList.value.length > 0 ? await askUserInput("给新任务Code起个别名，以便区别查看多任务:") : "Default";
-        fileTransProcessAdd(st.croc_code, typeReceive.value, input_memo, []);
-        memo.value = input_memo;
-      } finally {
-        isAskingMemo.value = false;
-      }
-    }
-
-    fileTransStatusUpdate(st.croc_code,typeReceive.value,st.info);
-    console.log("Overall receive status update:", receiveStatus.value);
-  });
-*/
 
   listenSendTextCode = await listen("croc-send-text-code", async(event) => {
     const code = event.payload as string;
@@ -757,25 +661,16 @@ onMounted(async () => {
     }
 
     
-    // 如果不是第一个发送任务
-    if (chatProcessList.value.length>0) {
       // 会话是否已在列表中
       if (!msgProcessIsInList(code)){
-        const input_memo= await askUserInput("给新任务Code起个别名，以便区别查看多任务:");
+        const input_memo= "Chat-"+(textChatCount.value as number + 1); //await askUserInput("给新任务Code起个别名，以便区别查看多任务:");
         msgAddProcess(code,input_memo);
         memo.value=input_memo;
         //darkAlert(memo);
       }
-    }else{
-      //如果是第一个发送任务，则默认
-      console.log("第一个默认任务");
-      msgAddProcess(code,"Chat[1]");
-      memo.value="Chat[1]";
-    }
     // record the msg
     msgAdd(code,inputText.value,"To");
 
-    //chatText.value += "\n[To:] "+getTime()+" ["+code+"]\n"+inputText.value;
     inputText.value="";
     //darkAlert(memo);
     console.log("Received croc code:", crocCode.value);
@@ -784,9 +679,6 @@ onMounted(async () => {
     const message = event.payload as emitInfo;
     // latest msg add "(Received)"
     msgUpdateLastMsgStatus(message.croc_code);
-//    if (crocCode.value===message.croc_code){
-//      chatText.value += " (Received)\n"; //sendStatus.value+"-["+message.croc_code+"]\n"+message.info+"\n";
-//    }
     if (isWaiting(message.croc_code)){
       deleteCode(message.croc_code);
     }
@@ -794,39 +686,22 @@ onMounted(async () => {
   });
   listenSendTextStatus = await listen("croc-send-text-status",(event)=>{
     const message = event.payload as emitInfo;
-   // if(message.croc_code===crocCode.value){
-   //   sendStatus.value=message.info;
-   // }
     console.log(message);
   });
   listenReceiveTextStatus = await listen("croc-receive-text-status",(event)=>{
     const message = event.payload as emitInfo;
-    //if(message.croc_code===crocCode.value){
-    //  sendStatus.value=message.info;
-    //}
     console.log(message);
   });
   listenReceiveTextMsg = await listen("croc-receive-text-msg",async(event)=>{
     const msg = event.payload as emitInfo;
     //darkAlert(message.info);
-    //if(message.croc_code===crocCode.value){
-    //  chatText.value += "\n[From:] "+getTime()+" ["+message.croc_code+"]\n"+ message.info+"\n";
-    //}
-    // 如果不是第一个发送任务
-    if (chatProcessList.value.length>0) {
       // 会话是否已在列表中
       if (!msgProcessIsInList(msg.croc_code)){
-        const input_memo= await askUserInput("给新任务Code起个别名，以便区别查看多任务:");
+        const input_memo=  "Chat-"+(textChatCount.value as number + 1); //await askUserInput("给新任务Code起个别名，以便区别查看多任务:");
         msgAddProcess(msg.croc_code,input_memo);
         memo.value=input_memo;
         //darkAlert(memo);
       } 
-    }else{
-      //如果是第一个发送任务，则默认
-      console.log("第一个默认任务");
-      msgAddProcess(msg.croc_code,"Chat[1]");
-      memo.value="Chat[1]";
-    }
     // record the msg
     msgAdd(msg.croc_code,msg.info,"From");
     console.log(msg);
@@ -855,6 +730,20 @@ watch(chatText,async ()=>{
   await nextTick(); //等待TextArea渲染
   if (chatText.value && chatArea.value){
     chatArea.value.scrollTop=chatArea.value.scrollHeight;
+  }
+});
+watch(memo,(newMemo)=> {
+  if(transferType.value===typeTextChat.value){
+
+    const item= chatProcessList.value.find( p => p.croc_code=== crocCode.value );
+    if(item){
+      item.memo=newMemo;
+    }
+  } else {
+    const item= fileProcessList.value.find( p => p.croc_code=== crocCode.value && p.type===transferType.value );
+    if(item){
+      item.memo=newMemo;
+    }
   }
 });
 
@@ -893,7 +782,7 @@ onBeforeUnmount(() => {
             </button>
           </li>
           <li class="nav-item" role="presentation">
-            <button class="nav-link" id="chat-tab" data-bs-toggle="tab" data-bs-target="#chat-pane" type="button" role="tab">
+            <button class="nav-link" @click="onClickTextChat" id="chat-tab" data-bs-toggle="tab" data-bs-target="#chat-pane" type="button" role="tab">
               文本聊天<br>Text Chat
             </button>
           </li>
@@ -908,7 +797,8 @@ onBeforeUnmount(() => {
 When sending,enter custom Code or leave it blank to generate Code automatically.
 When receiving,enter the Code provided by other side.&#10;When transmitting continuously or back and forth,the Code can be kept unchanged." 
           placeholder="">
-          <input type="text" v-model="memo"  class="form-control flex-shrink-0" style = "width:60px;flex:0 0 100px;text-align:center;" readonly title="Code别名，用于多任务切换时便于记忆。&#10;Remarks of Code,remember conveniently when multi-task switch.">
+          <input type="text" v-model="memo"  class="form-control flex-shrink-0" style = "width:80px;flex:0 0 100px;text-align:center;" title="Code别名，用于多任务切换时便于记忆。&#10;可修改！&#10;Remarks of Code,remember conveniently when multi-task switch.&#10;Modifyable!" 
+          placeholder="别名可修改">
           <button type="button" @click="newProcess" class="btn input-group btn-success btn-outline-warning flex-shrink-0" style = "width:60px;text-align:center; padding-left:0px;padding-right:0px;"
           title="点击开始新任务,之前的任务会后台继续运行。&#10;点击Code输入框可切换任务。&#10;Start a new transfer,the transfers before will still running.&#10;Click input box of Code can switch the tasks.">New</button>
         </div>
@@ -939,7 +829,7 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
               :data-type="code.type"
               :data-code="code.croc_code"
               :data-memo="code.memo"
-              class="list-group-item list-group-item-action bg-secondary text-white"
+               class="list-group-item list-group-item-action bg-secondary text-white" :class="{'active-row': code.type===transferType && code.croc_code===crocCode }"
               style="display: grid; grid-template-columns: 90px 300px 100px; cursor: pointer;">
             <div>{{ code.type }}</div>
             <div>{{ code.croc_code }}</div>
@@ -955,12 +845,12 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
         <!-- File Transfer content -->
         <ul class="nav nav-tabs mb-0" style="margin-left:10px;" id="secondTab" role="tablist">
           <li class="nav-item" role="presentation">
-            <button class="nav-link active" id="send-file-tab" data-bs-toggle="tab" data-bs-target="#send-file-pane" type="button" role="tab">
+            <button class="nav-link active" @click="onClickFileSend" id="send-file-tab" data-bs-toggle="tab" data-bs-target="#send-file-pane" type="button" role="tab">
               发送/Send
             </button>
           </li>
           <li class="nav-item" role="presentation">
-            <button class="nav-link"  id="receive-file-tab" data-bs-toggle="tab" data-bs-target="#receive-file-pane" type="button" role="tab">
+            <button class="nav-link" @click="onClickFileReceive" id="receive-file-tab" data-bs-toggle="tab" data-bs-target="#receive-file-pane" type="button" role="tab">
               接收/Receive
             </button>
           </li>
