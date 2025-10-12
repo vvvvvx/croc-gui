@@ -125,14 +125,14 @@ const codesList = computed<Process[]>(()=> { //下拉框显示内容
   return [...fileProcesses, ...chatProcesses];
 
 }); 
-
-const sendPaths= computed<fileItem[]>(()=> {// Selected file or folder paths to send
-  //if(tempPaths.value.length>0){
-  //  return tempPaths.value;
-  //}
+// Selected file or folder paths to send
+const sendPaths= computed<fileItem[]>(()=> {
+  console.log("fileProcessList:",fileProcessList);
   const progress=fileProcessList.value.find(
     p => p.croc_code === crocCode.value && p.type == typeSend.value
   );
+  console.log("sendPaths:",progress ? progress.files : tempPaths.value);
+  console.log("tempPaths:",tempPaths.value);
   return progress ? progress.files : tempPaths.value;
 });
 
@@ -165,7 +165,7 @@ let listenReceiveTextMsg :UnlistenFn | null = null;
 let listenReceiveTextStatus :UnlistenFn | null = null;
 
 async function selectFile() {
-  tempPaths.value=[];
+  //tempPaths.value=[];
   const selected = await open({
     multiple: true,
     directory: isFolder.value,
@@ -182,17 +182,23 @@ async function selectFile() {
     tempPaths.value = [];
   }
   //console.log(sendPaths);
-  console.log(tempPaths);
+  console.log("selectFile(),tempPaths:",tempPaths.value);
 }
 
 
 function selectCode(li: HTMLElement) {
+
+  
   crocCode.value = li.dataset.code as string;
   memo.value=li.dataset.memo as string;
   transferType.value=li.dataset.type as string;
 
-  console.log("li-dataset:", crocCode.value,memo.value,transferType.value);
+  console.log("li-dataset:", li.dataset.code,li.dataset.memo,li.dataset.type);
   dropdownCodesListOpen.value = false; 
+  
+  //处理List 高亮
+  document.querySelectorAll(".active-row").forEach(el => el.classList.remove("active-row"));
+  li.classList.add("active-row");
 
   // 一级 tab
   const mainTabId = (transferType.value === 'TextChat') ? 'chat-tab' : 'file-tab';
@@ -385,18 +391,25 @@ function fileTransStatusUpdate(code:string,type:string,transStatus:string){
 //  if (exist) return exist.status;
 //  return "";
 //}
-function fileTransProcessAdd(code:string,type:string,memo:string,files:fileItem[]){
+function fileTransProcessAdd(code:string,type:string,memo:string,in_files:fileItem[]){
   
+  console.log("fileTransProcessAdd,files:",in_files);
   const exist= fileProcessList.value.find( c => c.croc_code == code && c.type==type);
+  console.log("fileTransProcessAdd,exist:",exist);
+
   if(!exist){
+    const copyFiles=Array.isArray(in_files) ?  [...in_files] : [];
+    console.log("in if(!exist)");
     fileProcessList.value.push({
       croc_code:code,
       type:type,
       memo:memo,
       status:"Pending",
-      files:files
+      files:copyFiles
     });
   }
+
+  console.log("fileTransProcessAdd,fileProcessList:",fileProcessList.value);
 }
 function fileTransIsInList(code:string,type:string):boolean{
   const exist= fileProcessList.value.some( c => c.croc_code == code && c.type==type);
@@ -430,7 +443,7 @@ async function sendFiles() {
   }
   
   // Implement file sending logic here
-  await invoke("send_files", { files: sendPaths.value, code: crocCode.value });
+  await invoke("send_files", { files: sendPaths.value, code: crocCode.value,isFolder: isFolder.value });
   
 }
 async function receiveFiles() {
@@ -502,7 +515,7 @@ onMounted(async () => {
       if (!fileTransIsInList(code,typeSend.value)){
         const input_memo= await askUserInput("给新任务Code起个别名，以便区别查看多任务:");
         fileTransProcessAdd(code,typeSend.value,input_memo,tempPaths.value);
-        console.log("tempPaths:",tempPaths.value);
+        console.log("listen croc-code,tempPaths:",tempPaths.value);
         tempPaths.value=[];
         memo.value=input_memo;
         //darkAlert(memo);
@@ -510,11 +523,13 @@ onMounted(async () => {
     }else{
       //如果是第一个发送任务，则默认
       console.log("第一个默认任务");
+      console.log("tempPaths：",tempPaths.value);
+
       fileTransProcessAdd(code,typeSend.value,"Send[1]",tempPaths.value);
       memo.value="Send[1]";
       tempPaths.value=[];
     }
-    console.log("fileProcessList:", fileProcessList.value);
+    console.log("listen croc-code ,fileProcessList:", fileProcessList.value);
     console.log("Received croc code:", crocCode.value);
   });
 
@@ -606,6 +621,7 @@ onMounted(async () => {
         console.log("第一个默认任务");
         fileTransProcessAdd(pr.croc_code,typeReceive.value,"Receive[1]",pr.files);
         memo.value="Receive[1]";
+        console.log("fileProcessList:",fileProcessList.value);
       }else{
 
         if(isAskingMemo.value){
@@ -896,10 +912,40 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
           <button type="button" @click="newProcess" class="btn input-group btn-success btn-outline-warning flex-shrink-0" style = "width:60px;text-align:center; padding-left:0px;padding-right:0px;"
           title="点击开始新任务,之前的任务会后台继续运行。&#10;点击Code输入框可切换任务。&#10;Start a new transfer,the transfers before will still running.&#10;Click input box of Code can switch the tasks.">New</button>
         </div>
+        <!--
         <ul v-show="dropdownCodesListOpen" ref="dropdownRef" class="list-group position-absolute w-100" style="z-index: 9001; top: 100%; left: 0;">
           <li v-for="code in codesList" :key="code.croc_code" @click="selectCode($event.currentTarget as HTMLElement)" :data-type="code.type" :data-code="code.croc_code" :data-memo="code.memo" :data-status="code.status" class="list-group-item list-group-item-action bg-secondary text-white" style="cursor: pointer;">
             [ {{ code.type }} ] [ {{  code.croc_code }} ] [ {{ code.memo }} ] 
           </li>
+        </ul>
+        -->
+        <ul v-show="dropdownCodesListOpen"
+            ref="dropdownRef"
+            class="list-group position-absolute w-100"
+            style="z-index: 9001; top: 100%; left: 0;">
+
+          <!-- 表头 -->
+          <div class="list-group-item bg-secondary text-white"
+              style="display: grid; grid-template-columns: 90px 300px 100px; font-weight: bold; cursor: default;">
+            <div>Type</div>
+            <div>Code</div>
+            <div>Memo</div>
+          </div>
+
+          <!-- 表格行（每行可点） -->
+          <div v-for="code in codesList"
+              :key="code.croc_code"
+              @click="selectCode($event.currentTarget as HTMLElement)"
+              :data-type="code.type"
+              :data-code="code.croc_code"
+              :data-memo="code.memo"
+              class="list-group-item list-group-item-action bg-secondary text-white"
+              style="display: grid; grid-template-columns: 90px 300px 100px; cursor: pointer;">
+            <div>{{ code.type }}</div>
+            <div>{{ code.croc_code }}</div>
+            <div>{{ code.memo }}</div>
+          </div>
+
         </ul>
       </div>
     </div>
@@ -1086,6 +1132,10 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
 </template>
 
 <style scoped>
+    .list-group-item.active-row {
+      background-color: #198754 !important; /* Bootstrap success 绿色 */
+      color: white !important;
+    }
     /* 美化 tab 样式 */
     .nav-tabs  {
       border-bottom: none;

@@ -187,7 +187,7 @@ fn insert_files_after_dir(files: Vec<FileItem>) -> Vec<FileItem> {
                 result.append(&mut dir_files);
             }
         } else {
-           // result.push(file.clone());
+            //result.push(file.clone());
         }
     }
     result
@@ -255,6 +255,7 @@ async fn send_files(
     window: tauri::Window,
     mut files: Vec<FileItem>, // 需要发送的文件列表或目录
     code: String,             // 传输代码Code
+    is_folder:bool,           // 是否为目录
 ) -> Result<(), String> {
     let mut croc_args = vec![
         "--yes".to_string(),
@@ -290,7 +291,9 @@ async fn send_files(
     }
 
     // 处理目录，插入目录下的文件
-    files = insert_files_after_dir(files);
+    if is_folder {
+        files = insert_files_after_dir(files);
+    }
     // 启动 croc 进程
     println!("Running croc with args: {croc_args:?}");
 
