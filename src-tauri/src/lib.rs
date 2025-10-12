@@ -173,16 +173,21 @@ fn get_direct_files(path: &str) -> Result<Vec<FileItem>, std::io::Error> {
     }
     Ok(files)
 }
+//Extract dir to file list
 fn insert_files_after_dir(files: Vec<FileItem>) -> Vec<FileItem> {
     let mut result: Vec<FileItem> = Vec::new();
     for file in files.iter() {
-        // result.push(file.clone());
         if is_dir(&file.file) {
+            result.push(FileItem {
+                file: file.file.clone(),
+                status: "Pending".to_string(),
+                is_dir: true,
+            });
             if let Ok(mut dir_files) = get_direct_files(&file.file) {
                 result.append(&mut dir_files);
             }
         } else {
-            result.push(file.clone());
+           // result.push(file.clone());
         }
     }
     result

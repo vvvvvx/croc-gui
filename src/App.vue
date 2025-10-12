@@ -50,7 +50,8 @@ interface chatProcess{
 interface Process {
   croc_code :string,
   type:string,
-  memo:string
+  memo:string,
+  status:string
 }
 
 const curVersion=ref(''); //当前版本号
@@ -70,8 +71,6 @@ const memo = ref<string>("");// Code memo
 const transferType = ref<string>("FileSend");// FileSend | FileReceive | TextChat
 const waitingCodesList = ref<string[]>([]); //Croc codes which are waiting for receiving
 const savePath=ref<string>(""); // Application directory path
-const sendStatus=ref<string>("Pending"); // Overall send status
-const receiveStatus=ref<string>(""); // Overall receive status
 const isSending=ref<boolean>(false); // Whether currently sending files
 const inputText=ref<string>(""); // text to send
 const fileProcessList = ref<fileProcess[]>([]); // for multi sending
@@ -86,6 +85,18 @@ const isAskingMemo = ref<boolean>(false); // 是否在等待用户输入memo,防
 //  fileProcessList.value.filter(fp => fp.type== "FileSend").length
 //});
 
+const sendStatus= computed (()=>{   // current send status
+  const fp=fileProcessList.value.find(
+    p => p.croc_code === crocCode.value && p.type == typeSend.value
+  );
+  return fp ? fp.status: "";
+});
+const receiveStatus= computed (()=>{   // current receive status
+  const fp=fileProcessList.value.find(
+    p => p.croc_code === crocCode.value && p.type == typeReceive.value
+  );
+  return fp ? fp.status: "";
+});
 const fileReceiveCount = computed (()=>{
   return fileProcessList.value.filter(fp => fp.type== "FileReceive").length;
 });
@@ -98,14 +109,16 @@ const codesList = computed<Process[]>(()=> { //下拉框显示内容
   const fileProcesses: Process[] = fileProcessList.value.map(fp => ({
     croc_code: fp.croc_code,
     type: fp.type,  // TextChat / FileSend / FileReceive
-    memo: fp.memo
+    memo: fp.memo,
+    status:fp.status
   }));
 
   // 再把 chatProcessList 转换成 Process
   const chatProcesses: Process[] = chatProcessList.value.map(cp => ({
     croc_code: cp.croc_code,
     type: cp.type,  // TextChat / FileSend / FileReceive
-    memo: cp.memo
+    memo: cp.memo,
+    status:""
   }));
 
   // 合并数组
@@ -152,6 +165,7 @@ let listenReceiveTextMsg :UnlistenFn | null = null;
 let listenReceiveTextStatus :UnlistenFn | null = null;
 
 async function selectFile() {
+  tempPaths.value=[];
   const selected = await open({
     multiple: true,
     directory: isFolder.value,
@@ -176,6 +190,7 @@ function selectCode(li: HTMLElement) {
   crocCode.value = li.dataset.code as string;
   memo.value=li.dataset.memo as string;
   transferType.value=li.dataset.type as string;
+
   console.log("li-dataset:", crocCode.value,memo.value,transferType.value);
   dropdownCodesListOpen.value = false; 
 
@@ -364,6 +379,12 @@ function fileTransStatusUpdate(code:string,type:string,transStatus:string){
   }
   exist.status=transStatus;
 }
+//function fileTranStatusGet(code:string,type:string):string{
+
+//  const exist= fileProcessList.value.find( c => c.croc_code == code && c.type==type);
+//  if (exist) return exist.status;
+//  return "";
+//}
 function fileTransProcessAdd(code:string,type:string,memo:string,files:fileItem[]){
   
   const exist= fileProcessList.value.find( c => c.croc_code == code && c.type==type);
@@ -464,7 +485,7 @@ onMounted(async () => {
   });
   listenReceiveError = await listen("croc-receive-error", (event) => {
     const message = event.payload as string;
-    //darkAlert("Code: "+message.croc_code+"\n\n"+message.info);
+    //darkAlert("Code: "+message.croc_/code+"\n\n"+message.info);
     darkAlert(message+"\n\n");
     console.error("croc receive error:", message);
   });
@@ -489,7 +510,7 @@ onMounted(async () => {
     }else{
       //如果是第一个发送任务，则默认
       console.log("第一个默认任务");
-      fileTransProcessAdd(code,typeSend.value,"[Send[1]]",tempPaths.value);
+      fileTransProcessAdd(code,typeSend.value,"Send[1]",tempPaths.value);
       memo.value="Send[1]";
       tempPaths.value=[];
     }
@@ -505,7 +526,7 @@ onMounted(async () => {
     } else {
       tempPaths.value=progress.files;
 
-      console.log("错误：文件发送进度更新，未找到对应进程会话,tempPaths:",progress.files);
+      console.log("错误：文件发送进度更新，未找到对应进程会话,tempPaths:",tempPaths.value);
     }
     // 是当前传输进程才更新，否则会混乱。
 
@@ -524,11 +545,11 @@ onMounted(async () => {
   listenStatus = await listen("croc-send-file-status", (event) => {
     const st = event.payload as emitInfo;
     //if (crocCode.value===status.croc_code){
-      sendStatus.value = st.info;
+    //  sendStatus.value = st.info;
     //}
 
     fileTransStatusUpdate(st.croc_code,typeSend.value,st.info);
-    console.log("Overall status update:", sendStatus.value);
+    console.log("Send file status update:", st);
 
   });
   listenReady = await listen("croc-send-file-ready", (event) => {
@@ -552,7 +573,7 @@ onMounted(async () => {
     }
 
     fileTransStatusUpdate(message.croc_code,typeSend.value,"All sent");
-    sendStatus.value="All sent"
+    //sendStatus.value="All sent"
     console.log("Croc send done:", message);
   });
   listenSendFileSuccess = await listen("croc-send-file-success", (event) => {
@@ -562,7 +583,7 @@ onMounted(async () => {
     if(isWaiting(message.croc_code)){
       deleteCode(message.croc_code);
     }
-    sendStatus.value="All sent"
+    //sendStatus.value="All sent"
 
     fileTransStatusUpdate(message.croc_code,typeSend.value,"All sent");
     console.log("Croc send success:", message);
@@ -615,7 +636,7 @@ onMounted(async () => {
 */
   listenReceiveFileSuccess = await listen("croc-receive-file-success", (event) => {
     const msg= event.payload as emitInfo;
-    receiveStatus.value="Received all"
+    //receiveStatus.value="Received all"
 
     fileTransStatusUpdate(msg.croc_code,typeReceive.value,"Received all");
     darkAlert(msg.info+"\n\n");
@@ -624,7 +645,7 @@ onMounted(async () => {
 
   listenReceiveStatus = await listen("croc-receive-file-status", async(event) => {
     const st= event.payload as emitInfo;
-    receiveStatus.value=st.info;
+    //receiveStatus.value=st.info;
     if (st.croc_code.trim().length===0){
       darkAlert("错误：更新Receive file状态时，Code为空。");
       return;
@@ -649,7 +670,7 @@ onMounted(async () => {
       }
     }
     fileTransStatusUpdate(st.croc_code,typeReceive.value,st.info);
-    console.log("Overall receive status update:", receiveStatus.value);
+    console.log("Overall receive status update:", st);
   });
 /*
   listenReceiveFileProgress = await listen("croc-receive-file-progress",async (event) => {
@@ -757,15 +778,17 @@ onMounted(async () => {
   });
   listenSendTextStatus = await listen("croc-send-text-status",(event)=>{
     const message = event.payload as emitInfo;
-    if(message.croc_code===crocCode.value){
-      sendStatus.value=message.info;
-    }
+   // if(message.croc_code===crocCode.value){
+   //   sendStatus.value=message.info;
+   // }
+    console.log(message);
   });
   listenReceiveTextStatus = await listen("croc-receive-text-status",(event)=>{
     const message = event.payload as emitInfo;
-    if(message.croc_code===crocCode.value){
-      sendStatus.value=message.info;
-    }
+    //if(message.croc_code===crocCode.value){
+    //  sendStatus.value=message.info;
+    //}
+    console.log(message);
   });
   listenReceiveTextMsg = await listen("croc-receive-text-msg",async(event)=>{
     const msg = event.payload as emitInfo;
@@ -874,7 +897,7 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
           title="点击开始新任务,之前的任务会后台继续运行。&#10;点击Code输入框可切换任务。&#10;Start a new transfer,the transfers before will still running.&#10;Click input box of Code can switch the tasks.">New</button>
         </div>
         <ul v-show="dropdownCodesListOpen" ref="dropdownRef" class="list-group position-absolute w-100" style="z-index: 9001; top: 100%; left: 0;">
-          <li v-for="code in codesList" :key="code.croc_code" @click="selectCode($event.currentTarget as HTMLElement)" :data-type="code.type" :data-code="code.croc_code" :data-memo="code.memo" class="list-group-item list-group-item-action bg-secondary text-white" style="cursor: pointer;">
+          <li v-for="code in codesList" :key="code.croc_code" @click="selectCode($event.currentTarget as HTMLElement)" :data-type="code.type" :data-code="code.croc_code" :data-memo="code.memo" :data-status="code.status" class="list-group-item list-group-item-action bg-secondary text-white" style="cursor: pointer;">
             [ {{ code.type }} ] [ {{  code.croc_code }} ] [ {{ code.memo }} ] 
           </li>
         </ul>
