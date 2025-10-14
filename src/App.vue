@@ -45,6 +45,8 @@ interface chatProcess{
   croc_code:string,
   type:string, //TextChat or FileSend or FileReceive
   memo:string, // mark the code to who
+  isListening:boolean, // if true ,must wait the back msg first.
+  isChatEstablished:boolean,
   msgList:txtMsg[],
 }
 interface Process {
@@ -353,6 +355,34 @@ function msgAdd(code:string,msg:string,fromOrTo:string){
     darkAlert("错误：记录聊天消息时，找不到对应聊天会话。\n\n");
   }
 }
+// Get the listening status of this chatProcess
+function msgListeningStatusGet(code:string):boolean {
+  const exist= chatProcessList.value.find( c => c.croc_code == code);
+  if(exist){
+    return exist.isListening;
+  }
+  return false; 
+}
+
+// Set the listening status of this chatProcess
+function msgListeningStatusSet(code:string,status:boolean) {
+  const exist= chatProcessList.value.find( c => c.croc_code == code);
+  if(exist){
+    exist.isListening=status;
+  }
+}
+function msgChatEstablishedStatusGet(code:string,status:boolean) {
+  const exist= chatProcessList.value.find( c => c.croc_code == code);
+  if(exist){
+    return exist.isChatEstablished;
+  }
+}
+function msgChatEstablishedStatusSet(code:string,status:boolean) {
+  const exist= chatProcessList.value.find( c => c.croc_code == code);
+  if(exist){
+    exist.isChatEstablished=status;
+  }
+}
 // 更新最后一条发送信息是否已收到。
 function msgUpdateLastMsgStatus(code:string){
   const exist= chatProcessList.value.find( c => c.croc_code == code);
@@ -375,6 +405,8 @@ function msgAddProcess(code:string,memo:string){
       croc_code:code,
       memo:memo,
       type:typeTextChat.value,
+      isListening:false,
+      isChatEstablished:false,
       msgList:[]
     })
   }
@@ -490,10 +522,15 @@ async function sendText() {
     darkAlert("Code: "+ crocCode.value+"\n\n最后一次发送的消息对方还未接收，等待接收完成。\nThe last sent msg has not been received.\nWaiting for the reception to complete.\n\n")
     return;
   }
-
+  // 如果已发送，对方还未回复，程序处于监听状态，不能重复发送。
+  if(msgListeningStatusGet(crocCode.value)){
+    darkAlert("对方回复后才能发送下一条。\n Can not send before the last msg be replied.");
+    return;
+  }
   if(crocCode.value.trim()!=="" && !isWaiting(crocCode.value.trim())) {
     waitingCodesList.value.push(crocCode.value);
   }
+
   await invoke("send_text", { msg:inputText.value, code: crocCode.value });
 }
 async function receiveText() {
@@ -684,6 +721,11 @@ onMounted(async () => {
     if (isWaiting(message.croc_code)){
       deleteCode(message.croc_code);
     }
+    // set listening status to true
+    msgListeningStatusSet(message.croc_code,true);
+    msgChatEstablishedStatusSet(message.croc_code,true);
+    // if other side received the msg, continuely listen the coming msg.
+    invoke("start_chat_listener",{code: message.croc_code} );
     console.log("Croc receive success:", message);
   });
   listenSendTextStatus = await listen("croc-send-text-status",(event)=>{
@@ -702,10 +744,12 @@ onMounted(async () => {
         const input_memo=  "Chat-"+(textChatCount.value as number + 1); //await askUserInput("给新任务Code起个别名，以便区别查看多任务:");
         msgAddProcess(msg.croc_code,input_memo);
         memo.value=input_memo;
-        //darkAlert(memo);
       } 
     // record the msg
     msgAdd(msg.croc_code,msg.info,"From");
+    // set isListenning status to false
+    msgListeningStatusSet(msg.croc_code,false);
+
     console.log(msg);
   });
 
