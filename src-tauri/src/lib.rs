@@ -4,12 +4,12 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::env::consts::OS;
 use std::io::{self, Read};
-use std::process::{exit, Stdio};
-use std::process::{Child, Command, ExitStatus};
+use std::process::Stdio;
+use std::process::{Child, Command};
 use tokio::io::AsyncReadExt;
 //use tauri::plugin;
 use std::fs::{self};
-use tauri::{window, Emitter};
+use tauri::Emitter;
 //use std::path::Path;
 //use tauri_plugin_shell;
 
@@ -82,7 +82,7 @@ use std::{
         Arc,
     },
 };
-use tauri::{Manager, State};
+use tauri::State;
 use tokio::{
     process::Command as tCommand,
     sync::Mutex,
@@ -413,8 +413,7 @@ fn emit_exit_info(window: tauri::Window, oper_type: &str, code: String, status_c
                     "croc-send-error",
                     EmitInfo {
                         croc_code: code,
-                        info: "无接收内容或参数错误\nNo content to receive or parameter error\n\n"
-                            .to_string(),
+                        info: "普通错误，请重发。\nCommon error,please retry.\n\n".to_string(),
                     },
                 );
             } else {

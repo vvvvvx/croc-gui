@@ -47,6 +47,7 @@ interface chatProcess{
   memo:string, // mark the code to who
   isListening:boolean, // if true ,must wait the back msg first.
   isChatEstablished:boolean,
+  hasNewMsg: boolean, // if there are new messages,for notification
   msgList:txtMsg[],
 }
 interface Process {
@@ -146,7 +147,7 @@ const sendPaths= computed<fileItem[]>(()=> {
   return progress ? progress.files : tempPaths.value;
 });
 
-const receivePaths= computed<fileItem[]>(() => {
+const receivePaths = computed<fileItem[]>(() => {
   const progress=fileProcessList.value.find(
     p => p.croc_code === crocCode.value && p.type == typeReceive.value
   );
@@ -154,8 +155,11 @@ const receivePaths= computed<fileItem[]>(() => {
   return progress ? progress.files : [];
 
 }); // received file or folder paths 
+const chatEstablished = computed<boolean>(()=>{
 
-
+  if(crocCode.value.trim().length===0) return false;
+  return msgChatEstablishedStatusGet(crocCode.value);
+});
 let listenSendError: UnlistenFn | null = null;
 let listenReceiveError: UnlistenFn | null = null;
 let listenSendProgress: UnlistenFn | null = null;
@@ -200,7 +204,6 @@ async function selectFile() {
 
 
 function selectCode(li: HTMLElement) {
-
   
   crocCode.value = li.dataset.code as string;
   memo.value=li.dataset.memo as string;
@@ -208,7 +211,9 @@ function selectCode(li: HTMLElement) {
 
   console.log("li-dataset:", li.dataset.code,li.dataset.memo,li.dataset.type);
   dropdownCodesListOpen.value = false; 
-  
+ 
+  // set hasNewMsg to false
+  msgHasNewMsgStatusSet(crocCode.value,false);
   //处理List 高亮
   document.querySelectorAll(".active-row").forEach(el => el.classList.remove("active-row"));
   li.classList.add("active-row");
@@ -230,6 +235,26 @@ function selectCode(li: HTMLElement) {
       subTab.show();
     }
   }
+}
+
+function shoudListBlink(code:string):boolean {
+  const exist= chatProcessList.value.find( c => c.croc_code == code && c.hasNewMsg);
+  if(exist){
+    console.log("shoudListBlink:",exist.croc_code!==crocCode.value)
+    return (exist.croc_code!==crocCode.value)
+  }
+  return false;
+}
+
+function shoudInputBlink():boolean {
+  const exist= chatProcessList.value.find( c => c.hasNewMsg===true);
+  if(exist){
+    
+    console.log("shoudInputBlink exist:",exist);
+    console.log("shoudInputBlink:",true);
+    return true;
+  }
+  return false;
 }
 
 function openDropdown() {
@@ -273,7 +298,10 @@ function onKeydown(event: KeyboardEvent) {
     }
   }
 }
-
+//function chatEstablished():boolean{
+//  if(crocCode.value.trim()==="") return false;
+//  return msgChatEstablishedStatusGet(crocCode.value);
+//}
 function newProcess(){
   crocCode.value="";
   memo.value="";
@@ -371,16 +399,34 @@ function msgListeningStatusSet(code:string,status:boolean) {
     exist.isListening=status;
   }
 }
-function msgChatEstablishedStatusGet(code:string,status:boolean) {
+function msgChatEstablishedStatusGet(code:string):boolean {
+  if(code.trim().length===0) return false;
   const exist= chatProcessList.value.find( c => c.croc_code == code);
   if(exist){
     return exist.isChatEstablished;
   }
+  return false;
 }
 function msgChatEstablishedStatusSet(code:string,status:boolean) {
   const exist= chatProcessList.value.find( c => c.croc_code == code);
   if(exist){
     exist.isChatEstablished=status;
+  }
+}
+/*
+function msgHasNewMsgStatusGet(code:string):boolean {
+  if(code.trim().length===0) return false;
+  const exist= chatProcessList.value.find( c => c.croc_code == code);
+  if(exist){
+    return exist.hasNewMsg;
+  }
+  return false;
+}
+*/
+function msgHasNewMsgStatusSet(code:string,status:boolean) {
+  const exist= chatProcessList.value.find( c => c.croc_code == code);
+  if(exist){
+    exist.hasNewMsg=status;
   }
 }
 // 更新最后一条发送信息是否已收到。
@@ -407,6 +453,7 @@ function msgAddProcess(code:string,memo:string){
       type:typeTextChat.value,
       isListening:false,
       isChatEstablished:false,
+      hasNewMsg:false,
       msgList:[]
     })
   }
@@ -523,7 +570,7 @@ async function sendText() {
     return;
   }
   // 如果已发送，对方还未回复，程序处于监听状态，不能重复发送。
-  if(msgListeningStatusGet(crocCode.value)){
+  if( crocCode.value.trim().length>0 && msgListeningStatusGet(crocCode.value)){
     darkAlert("对方回复后才能发送下一条。\n Can not send before the last msg be replied.");
     return;
   }
@@ -553,13 +600,15 @@ onMounted(async () => {
     }
     console.error("croc send error:", message);
   });
+
   listenReceiveError = await listen("croc-receive-error", (event) => {
     const message = event.payload as string;
     //darkAlert("Code: "+message.croc_/code+"\n\n"+message.info);
     darkAlert(message+"\n\n");
     console.error("croc receive error:", message);
   });
-  listenCode = await listen("croc-code",async (event) => {
+
+  listenCode = await listen("croc-code",(event) => {
     const code = event.payload as string;
     crocCode.value = code;
     memo.value="";
@@ -594,6 +643,7 @@ onMounted(async () => {
     console.log("Send progress update:", progress);
     console.log("fileProcessList:",fileProcessList.value);
   });
+
   listenStatus = await listen("croc-send-file-status", (event) => {
     const st = event.payload as emitInfo;
 
@@ -601,6 +651,7 @@ onMounted(async () => {
     console.log("Send file status update:", st);
 
   });
+
   listenReady = await listen("croc-send-file-ready", (event) => {
     const message = event.payload as emitInfo;
     darkAlert("Code: "+message.croc_code+"\n\n"+message.info+"\n\n");
@@ -609,6 +660,7 @@ onMounted(async () => {
     }
     console.log("Croc ready:", message);
   });
+
   listenSendFileDone = await listen("croc-send-file-done", (event) => {
     const message = event.payload as emitInfo;
     //isSending.value = false;
@@ -624,6 +676,7 @@ onMounted(async () => {
     //sendStatus.value="All sent"
     console.log("Croc send done:", message);
   });
+
   listenSendFileSuccess = await listen("croc-send-file-success", (event) => {
     const message = event.payload as emitInfo;
     darkAlert("Code:"+message.croc_code+"\n\n"+message.info+"\n\n\n");
@@ -635,7 +688,8 @@ onMounted(async () => {
     fileTransStatusUpdate(message.croc_code,typeSend.value,"All sent");
     console.log("Croc send success:", message);
   });
-  listenReceiveFileProgress = await listen("croc-receive-file-progress",async (event) => {
+
+  listenReceiveFileProgress = await listen("croc-receive-file-progress",(event) => {
     //receivePaths.value = event.payload as fileItem[]; 
     const pr=event.payload as emitProgress;
 
@@ -674,7 +728,7 @@ onMounted(async () => {
     console.log("Croc receive success:", fileProcessList.value);
   });
 
-  listenReceiveStatus = await listen("croc-receive-file-status", async(event) => {
+  listenReceiveStatus = await listen("croc-receive-file-status", (event) => {
     const st= event.payload as emitInfo;
     //receiveStatus.value=st.info;
     if (st.croc_code.trim().length===0){
@@ -690,7 +744,7 @@ onMounted(async () => {
     console.log("Overall receive status update:", st);
   });
 
-  listenSendTextCode = await listen("croc-send-text-code", async(event) => {
+  listenSendTextCode = await listen("croc-send-text-code", (event) => {
     const code = event.payload as string;
     crocCode.value = code.trim();
 
@@ -698,15 +752,13 @@ onMounted(async () => {
     if(!isWaiting(code.trim())){
       waitingCodesList.value.push(code.trim());
     }
-
-    
-      // 会话是否已在列表中
-      if (!msgProcessIsInList(code)){
-        const input_memo= "Chat-"+(textChatCount.value as number + 1); //await askUserInput("给新任务Code起个别名，以便区别查看多任务:");
-        msgAddProcess(code,input_memo);
-        memo.value=input_memo;
-        //darkAlert(memo);
-      }
+    // 会话是否已在列表中
+    if (!msgProcessIsInList(code)){
+      const input_memo= "Chat-"+(textChatCount.value as number + 1); //await askUserInput("给新任务Code起个别名，以便区别查看多任务:");
+      msgAddProcess(code,input_memo);
+      memo.value=input_memo;
+      //darkAlert(memo);
+    }
     // record the msg
     msgAdd(code,inputText.value,"To");
 
@@ -714,13 +766,19 @@ onMounted(async () => {
     //darkAlert(memo);
     console.log("Received croc code:", crocCode.value);
   });
+
   listenSendTextSuccess = await listen("croc-send-text-success", (event) => {
     const message = event.payload as emitInfo;
     // latest msg add "(Received)"
     msgUpdateLastMsgStatus(message.croc_code);
+
     if (isWaiting(message.croc_code)){
       deleteCode(message.croc_code);
     }
+    // record the msg
+    //msgAdd(message.croc_code,inputText.value,"To");
+
+    //inputText.value="";
     // set listening status to true
     msgListeningStatusSet(message.croc_code,true);
     msgChatEstablishedStatusSet(message.croc_code,true);
@@ -728,15 +786,18 @@ onMounted(async () => {
     invoke("start_chat_listener",{code: message.croc_code} );
     console.log("Croc receive success:", message);
   });
+
   listenSendTextStatus = await listen("croc-send-text-status",(event)=>{
     const message = event.payload as emitInfo;
     console.log(message);
   });
+
   listenReceiveTextStatus = await listen("croc-receive-text-status",(event)=>{
     const message = event.payload as emitInfo;
     console.log(message);
   });
-  listenReceiveTextMsg = await listen("croc-receive-text-msg",async(event)=>{
+
+  listenReceiveTextMsg = await listen("croc-receive-text-msg",(event)=>{
     const msg = event.payload as emitInfo;
     //darkAlert(message.info);
       // 会话是否已在列表中
@@ -749,7 +810,11 @@ onMounted(async () => {
     msgAdd(msg.croc_code,msg.info,"From");
     // set isListenning status to false
     msgListeningStatusSet(msg.croc_code,false);
-
+    // set hasNewMsg status to true
+    if(msg.croc_code!==crocCode.value){
+      msgHasNewMsgStatusSet(msg.croc_code,true);
+      console.log("hasNewMsg:",true);
+    }
     console.log(msg);
   });
 
@@ -838,12 +903,12 @@ onBeforeUnmount(() => {
         <div class="input-group mb-0 mt-0" style="float:right;">
           <span class="input-group-text text-white bg-secondary" id="basic-addon2">Code</span>
 
-          <input type="text" @keydown="onKeydown" id="inputCode" ref="inputCodeRef" class="form-control " v-model="crocCode" @focus="openDropdown" 
+          <input type="text" class="form-control" :class="{ 'blink': shoudInputBlink() }" @keydown="onKeydown" id="inputCode" ref="inputCodeRef" v-model="crocCode" @focus="openDropdown" 
           title="发送时，可输入自定义或留空自动生成传输代码&#10;接收时，输入对方的传输代码&#10;连续或来回传输时，可保持Code不变
 When sending,enter custom Code or leave it blank to generate Code automatically.
 When receiving,enter the Code provided by other side.&#10;When transmitting continuously or back and forth,the Code can be kept unchanged." 
           placeholder="">
-          <input type="text" v-model="memo"  class="form-control flex-shrink-0" style = "width:80px;flex:0 0 100px;text-align:center;" title="Code别名，用于多任务切换时便于记忆。&#10;可修改！&#10;Remarks of Code,remember conveniently when multi-task switch.&#10;Modifyable!" 
+          <input type="text" v-model="memo"  class="form-control flex-shrink-0"  :class="{ 'blink': shoudInputBlink() }" style = "width:80px;flex:0 0 100px;text-align:center;" title="Code别名，用于多任务切换时便于记忆。&#10;可修改！&#10;Remarks of Code,remember conveniently when multi-task switch.&#10;Modifyable!" 
           placeholder="别名可改">
           <button type="button" @click="newProcess" class="btn input-group btn-success btn-outline-warning flex-shrink-0" style = "width:60px;text-align:center; padding-left:0px;padding-right:0px;"
           title="点击开始新任务,之前的任务会后台继续运行。&#10;点击Code输入框可切换任务。&#10;Start a new transfer,the transfers before will still running.&#10;Click input box of Code can switch the tasks.">New</button>
@@ -875,7 +940,8 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
               :data-type="code.type"
               :data-code="code.croc_code"
               :data-memo="code.memo"
-               class="list-group-item list-group-item-action bg-secondary text-white" :class="{'active-row': code.type===transferType && code.croc_code===crocCode }"
+               class="list-group-item list-group-item-action text-white bg-secondary" 
+               :class="{'active-row': code.type===transferType && code.croc_code===crocCode ,'blink':shoudListBlink(code.croc_code) }"
               style="display: grid; grid-template-columns: 90px 300px 100px; cursor: pointer;">
             <div>{{ code.type }}</div>
             <div>{{ code.croc_code }}</div>
@@ -1032,7 +1098,7 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
                   </div>
 
                   <div class="col-12">
-                    <span  style="float:right;" title="输入对方Code后，点击按钮接收信息。&#10;After entering the Code from sender,click to receive the message.">
+                    <span  style="float:right;" v-show="!chatEstablished" title="输入对方Code后，点击按钮接收信息。&#10;After entering the Code from sender,click to receive the message.">
                       <button class="btn btn-warning" @click="receiveText" >接收/Receive</button>
                     </span>
                   </div>
@@ -1172,126 +1238,42 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
       box-shadow:0 2px 4px rgba(0,0,0,0.2 );
       background-color:#333;
     }
+    .blink  {
+      animation: blink 1s infinite;
+    }
+    .list-group .list-blink .list-group-item.blink  {
+      animation: list-blink 1s infinite;
+    }
+    @keyframes blink {
+      0%,100%{
+        background-color : white;
+      }
+      50% {
+        background-color: #198754; /*bg-success*/
+        color: white;
+      }
+    }
+    @keyframes list-blink {
+      0%,100%{
+        background-color : #6c757d !important; /*bg-secondary*/
+      }
+      50% {
+        background-color: #198754 !important; /*bg-success */
+        color: white !important;
+      }
+    }
+    .list-group-item.blink::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: #198754;
+      opacity: 0;
+      z-index: 0;
+      animation: flash-bg 1s infinite;
+    }
 
-    
-        /*
-.logo.vite:hover {
-  filter: drop-shadow(0 0 2em #747bff);
-}
-
-.logo.vue:hover {
-  filter: drop-shadow(0 0 2em #249b73);
-}
-
-
-:root {
-  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 400;
-
-  color: #0f0f0f;
-  background-color: #f6f6f6;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  -webkit-text-size-adjust: 100%;
-}
-
-.container {
-  margin: 0;
-  padding-top: 10vh;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  text-align: center;
-}
-
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: 0.75s;
-}
-
-.logo.tauri:hover {
-  filter: drop-shadow(0 0 2em #24c8db);
-}
-
-.row {
-  display: flex;
-  justify-content: center;
-}
-
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-
-a:hover {
-  color: #535bf2;
-}
-
-h1 {
-  text-align: center;
-}
-
-input,
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  color: #0f0f0f;
-  background-color: #ffffff;
-  transition: border-color 0.25s;
-  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
-}
-
-button {
-  cursor: pointer;
-}
-
-button:hover {
-  border-color: #396cd8;
-}
-button:active {
-  border-color: #396cd8;
-  background-color: #e8e8e8;
-}
-
-input,
-button {
-  outline: none;
-}
-
-#greet-input {
-  margin-right: 5px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #f6f6f6;
-    background-color: #2f2f2f;
-  }
-
-  a:hover {
-    color: #24c8db;
-  }
-
-  input,
-  button {
-    color: #ffffff;
-    background-color: #0f0f0f98;
-  }
-  button:active {
-    background-color: #0f0f0f69;
-  }
-}
-*/
+    @keyframes flash-bg {
+      0%, 100% { opacity: 0; }
+      80% { opacity: 0.8; }
+    }
 </style>
