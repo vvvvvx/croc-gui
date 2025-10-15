@@ -763,6 +763,7 @@ onMounted(async () => {
     msgAdd(code,inputText.value,"To");
 
     inputText.value="";
+    darkAlert("Code: "+code+"\n\n聊天已就绪，把Code发给对方开始聊天。\n【Code已复制，直接粘贴】\n\nChat ready, provide the Code to recipient to chat.\n【Code copied to clipboard】");
     //darkAlert(memo);
     console.log("Received croc code:", crocCode.value);
   });
@@ -909,7 +910,7 @@ When sending,enter custom Code or leave it blank to generate Code automatically.
 When receiving,enter the Code provided by other side.&#10;When transmitting continuously or back and forth,the Code can be kept unchanged." 
           placeholder="">
           <input type="text" v-model="memo"  class="form-control flex-shrink-0"  :class="{ 'blink': shoudInputBlink() }" style = "width:80px;flex:0 0 100px;text-align:center;" title="Code别名，用于多任务切换时便于记忆。&#10;可修改！&#10;Remarks of Code,remember conveniently when multi-task switch.&#10;Modifyable!" 
-          placeholder="别名可改">
+          placeholder="editable">
           <button type="button" @click="newProcess" class="btn input-group btn-success btn-outline-warning flex-shrink-0" style = "width:60px;text-align:center; padding-left:0px;padding-right:0px;"
           title="点击开始新任务,之前的任务会后台继续运行。&#10;点击Code输入框可切换任务。&#10;Start a new transfer,the transfers before will still running.&#10;Click input box of Code can switch the tasks.">New</button>
         </div>
