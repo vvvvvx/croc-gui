@@ -112,7 +112,7 @@ async fn start_chat_listener(
 
     let running = Arc::new(AtomicBool::new(true));
     worker.tasks.insert(code.clone(), running.clone());
-    let window_clone = window.clone();
+    //let window_clone = window.clone();
     let state_clone = state.inner().clone();
     let code_clone = code.clone();
 
@@ -130,7 +130,7 @@ async fn start_chat_listener(
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .spawn()
-                .expect("Failed to spawn croc"); //
+                .expect("Failed to run croc,maybe croc not found"); //
 
             #[cfg(not(windows))]
             let mut child = tCommand::new("croc")
@@ -139,7 +139,7 @@ async fn start_chat_listener(
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .spawn()
-                .expect("Failed to spawn croc"); //
+                .expect("Failed to run croc,maybe croc not found"); //
 
             // 读取 stdout
             let mut stdout = child.stdout.take().unwrap();
@@ -153,8 +153,8 @@ async fn start_chat_listener(
             stderr.read_to_end(&mut stderr_buf).await.unwrap();
             let stderr_str = String::from_utf8_lossy(&stderr_buf);
 
-            println!("Listener stdout:{}", stdout_str);
-            println!("Listener stderr:{}", stderr_str);
+            println!("Listener stdout:{stdout_str}");
+            println!("Listener stderr:{stderr_str}");
             // if let Some(msg) = get_text_msg(&stderr_str) {
             //     println!("Extracted msg: {}", msg);
             //     window
@@ -491,12 +491,12 @@ fn emit_exit_info(window: tauri::Window, oper_type: &str, code: String, status_c
 fn emit_receive_signal(window: tauri::Window, signal: &str, message: &str) {
     window
         .emit(signal, Some(message.to_string()))
-        .expect(format!("Failed to send {} message", signal).as_str());
+        .unwrap_or_else(|_| panic!("Failed to send {signal} message"));
 }
 fn emit_send_signal(window: tauri::Window, signal: &str, message: EmitInfo) {
     window
         .emit(signal, Some(message))
-        .expect(format!("Failed to send {} message", signal).as_str());
+        .unwrap_or_else(|_| panic!("Failed to send {signal} message"));
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -572,7 +572,7 @@ async fn send_files(
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()
-                .expect("Failed to start rga command")
+                .expect("Failed to start croc command,maybe croc not found")
         } else {
             Command::new("croc")
                 .args(croc_args)
@@ -580,7 +580,7 @@ async fn send_files(
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()
-                .expect("Failed to start rga command")
+                .expect("Failed to start croc command,maybe croc not found")
         };
 
         #[cfg(windows)]
@@ -591,7 +591,7 @@ async fn send_files(
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .expect("Failed to start rga command");
+            .expect("Failed to start croc command");
 
         let mut code_str = "".to_string();
         if !code2.trim().is_empty() {
@@ -624,7 +624,7 @@ async fn send_files(
                                 .emit("croc-send-file-progress", Some(EmitProgress{croc_code:code_str.clone(),files: files.clone()}))
                                 .unwrap();
                             window
-                                .emit("croc-send-file-ready", Some(EmitInfo{croc_code:code_str.clone(),info: "文件已准备好，请把Code给对方以开始接收。\nFiles ready,provide the Code to recipient to receive.".to_string()}))
+                                .emit("croc-send-file-ready", Some(EmitInfo{croc_code:code_str.clone(),info: "文件已准备好，请把Code给对方以开始接收。\n【Code已复制，直接粘贴】\nFiles ready,provide the Code to recipient to receive.\n【Code copied to clipboard】".to_string()}))
                                 .unwrap();
                         }
 
@@ -835,7 +835,7 @@ async fn receive_files(
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()
-                .expect("Failed to start rga command");
+                .expect("Failed to start croc command");
 
         #[cfg(windows)]
         let mut child = Command::new("croc")
@@ -845,7 +845,7 @@ async fn receive_files(
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .expect("Failed to start rga command");
+            .expect("Failed to start croc command");
 
         // 处理 croc 输出
 
@@ -1045,7 +1045,7 @@ async fn send_text(
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()
-                .expect("Failed to start rga command")
+                .expect("Failed to start croc command")
         } else {
             Command::new("croc")
                 .args(croc_args)
@@ -1053,7 +1053,7 @@ async fn send_text(
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()
-                .expect("Failed to start rga command")
+                .expect("Failed to start croc command")
         };
 
         #[cfg(windows)]
@@ -1064,7 +1064,7 @@ async fn send_text(
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .expect("Failed to start rga command");
+            .expect("Failed to start croc command");
 
         let mut code_str = "".to_string();
         if !code2.trim().is_empty() {
@@ -1219,7 +1219,7 @@ async fn receive_text(
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()
-                .expect("Failed to start rga command");
+                .expect("Failed to start croc command");
 
         #[cfg(windows)]
         let mut child = Command::new("croc")
@@ -1229,7 +1229,7 @@ async fn receive_text(
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .expect("Failed to start rga command");
+            .expect("Failed to start croc command");
 
         let code_str = code2.trim().to_string();
         // 处理 croc 输出
