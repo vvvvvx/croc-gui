@@ -2,7 +2,7 @@
 import { onMounted,onBeforeUnmount,ref,nextTick,watch,computed} from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { homeDir } from "@tauri-apps/api/path";
+import { downloadDir } from "@tauri-apps/api/path";
 import { listen,UnlistenFn } from "@tauri-apps/api/event";
 import { getVersion } from '@tauri-apps/api/app';
 //import { ElMessageBox } from "element-plus";
@@ -38,6 +38,8 @@ interface fileProcess{
   type: string,// TextChat or FileSend or FileReceive
   memo:string, // mark the code to who
   status:string, // transfer result
+  newArrival:boolean, //if there are new files arrive ,for notification
+  savePath:String, // this Process save to where.
   files:fileItem[],
 }
 // 文本发送类
@@ -47,14 +49,15 @@ interface chatProcess{
   memo:string, // mark the code to who
   isListening:boolean, // if true ,must wait the back msg first.
   isChatEstablished:boolean,
-  hasNewMsg: boolean, // if there are new messages,for notification
+  newArrival: boolean, // if there are new messages,for notification
   msgList:txtMsg[],
 }
-interface Process {
+interface Process { //for droplist
   croc_code :string,
   type:string,
   memo:string,
-  status:string
+  status:string,
+  newArrival:boolean // if there are new message or files ，for  notification
 }
 
 const curVersion=ref(''); //当前版本号
@@ -66,6 +69,7 @@ const versionTitle=computed(()=>{return ((curVersion.value.toLowerCase() < lates
 const typeSend=ref("FileSend");
 const typeReceive=ref("FileReceive");
 const typeTextChat=ref("TextChat");
+const typeFileTrans=ref("FileTrans");
 const isFolder = ref(false); // File or Folder mode
 const hasWarned = ref(false);// custom Code warning,just once
 //const isFileTransfer= ref(true); //FileTransfer or TextChat
@@ -73,13 +77,14 @@ const crocCode = ref<string>(""); // Croc code for transfer
 const memo = ref<string>("");// Code memo
 const transferType = ref<string>("FileSend");// FileSend | FileReceive | TextChat
 const waitingCodesList = ref<string[]>([]); //Croc codes which are waiting for receiving
-const savePath=ref<string>(""); // Application directory path
+//const savePath=ref<string>(""); // the directory to save the received files
+const savePathTmp=ref<string>(""); // the directory to save the received files
 const isSending=ref<boolean>(false); // Whether currently sending files
 const inputText=ref<string>(""); // text to send
 const fileProcessList = ref<fileProcess[]>([]); // for multi sending
 const chatProcessList = ref<chatProcess[]>([]); // for multi chatting
 const chatArea=ref<HTMLTextAreaElement | null>(null); //聊天窗口TextArea
-const tempPaths = ref<fileItem[]>([]); //在发送文件时，在生成code之前，临时保存文件列表。
+const sendPathsTmp = ref<fileItem[]>([]); //在发送文件时，在生成code之前，临时保存文件列表。
 const dropdownCodesListOpen = ref(false);
 const wrapperRef = ref<HTMLElement | null>(null);
 const Tab = (window as any).bootstrap?.Tab;
@@ -121,7 +126,8 @@ const codesList = computed<Process[]>(()=> { //下拉框显示内容
     croc_code: fp.croc_code,
     type: fp.type,  // TextChat / FileSend / FileReceive
     memo: fp.memo,
-    status:fp.status
+    status:fp.status,
+    newArrival:fp.newArrival
   }));
 
   // 再把 chatProcessList 转换成 Process
@@ -129,22 +135,35 @@ const codesList = computed<Process[]>(()=> { //下拉框显示内容
     croc_code: cp.croc_code,
     type: cp.type,  // TextChat / FileSend / FileReceive
     memo: cp.memo,
-    status:""
+    status:"",
+    newArrival:cp.newArrival
   }));
 
   // 合并数组
   return [...fileProcesses, ...chatProcesses];
 
 }); 
+// the directory to save the received files
+const savePath= computed<string>(()=> {
+  const fp=fileProcessList.value.find(
+    p => p.croc_code === crocCode.value && p.type == typeReceive.value
+  );
+  console.log("savePath:",fp ? fp.savePath: savePathTmp.value);
+  console.log("savePathTmp:",savePathTmp.value);
+  const result=fp ? fp.savePath : savePathTmp.value;
+
+  return String(result);
+});
+
 // Selected file or folder paths to send
 const sendPaths= computed<fileItem[]>(()=> {
   console.log("fileProcessList:",fileProcessList);
   const progress=fileProcessList.value.find(
     p => p.croc_code === crocCode.value && p.type == typeSend.value
   );
-  console.log("sendPaths:",progress ? progress.files : tempPaths.value);
-  console.log("tempPaths:",tempPaths.value);
-  return progress ? progress.files : tempPaths.value;
+  console.log("sendPaths:",progress ? progress.files : sendPathsTmp.value);
+  console.log("sendPathsTmp:",sendPathsTmp.value);
+  return progress ? progress.files : sendPathsTmp.value;
 });
 
 const receivePaths = computed<fileItem[]>(() => {
@@ -171,6 +190,7 @@ let listenReceiveFileProgress: UnlistenFn | null = null;
 //let listenReceiveFileDone: UnlistenFn | null = null;
 let listenSendFileSuccess: UnlistenFn | null = null;
 let listenReceiveFileSuccess: UnlistenFn | null = null;
+let listenReceiveFileDir: UnlistenFn | null = null;
 let listenReceiveStatus: UnlistenFn | null = null;
 let listenSendTextSuccess: UnlistenFn | null = null;
 let listenSendTextStatus: UnlistenFn | null = null;
@@ -179,7 +199,7 @@ let listenReceiveTextMsg :UnlistenFn | null = null;
 let listenReceiveTextStatus :UnlistenFn | null = null;
 
 async function selectFile() {
-  //tempPaths.value=[];
+  //sendPathsTmp.value=[];
   const selected = await open({
     multiple: true,
     directory: isFolder.value,
@@ -187,19 +207,19 @@ async function selectFile() {
   });
   if (Array.isArray(selected)) {
     //sendPaths.value = selected.map((path) => ({ file: path, status: "待发送/Pending" ,is_dir: isFolder.value }));
-    tempPaths.value = selected.map((path) => ({ file: path, status: "待发送/Pending" ,is_dir: isFolder.value }));
+    sendPathsTmp.value = selected.map((path) => ({ file: path, status: "待发送/Pending" ,is_dir: isFolder.value }));
   } else if (typeof selected === "string") {
     //sendPaths.value = [{ file: selected, status: "待发送/Pending" ,is_dir: isFolder.value }];
-    tempPaths.value = [{ file: selected, status: "待发送/Pending" ,is_dir: isFolder.value }];
+    sendPathsTmp.value = [{ file: selected, status: "待发送/Pending" ,is_dir: isFolder.value }];
   } else {
     //sendPaths.value = [];
-    tempPaths.value = [];
+    sendPathsTmp.value = [];
   }
-  if(tempPaths.value.length!==0){
+  if(sendPathsTmp.value.length!==0){
     newProcess();
   }
   //console.log(sendPaths);
-  console.log("selectFile(),tempPaths:",tempPaths.value);
+  console.log("selectFile(),sendPathsTmp:",sendPathsTmp.value);
 }
 
 
@@ -212,11 +232,16 @@ function selectCode(li: HTMLElement) {
   console.log("li-dataset:", li.dataset.code,li.dataset.memo,li.dataset.type);
   dropdownCodesListOpen.value = false; 
  
-  // set hasNewMsg to false
-  msgHasNewMsgStatusSet(crocCode.value,false);
+  // set newArrival to false
+  newArrivalStatusSet(crocCode.value,transferType.value,false);
   //处理List 高亮
   document.querySelectorAll(".active-row").forEach(el => el.classList.remove("active-row"));
   li.classList.add("active-row");
+  
+  switchTab();
+}
+// for transferType,jump to right tab
+function switchTab(){
 
   // 一级 tab
   const mainTabId = (transferType.value === 'TextChat') ? 'chat-tab' : 'file-tab';
@@ -236,24 +261,19 @@ function selectCode(li: HTMLElement) {
     }
   }
 }
-
+/*
 function shoudListBlink(code:string):boolean {
-  const exist= chatProcessList.value.find( c => c.croc_code == code && c.hasNewMsg);
+  const exist= chatProcessList.value.find( c => c.croc_code == code && c.newArrival);
   if(exist){
     console.log("shoudListBlink:",exist.croc_code!==crocCode.value)
-    return (exist.croc_code!==crocCode.value)
+    return (exist.croc_code!==crocCode.value || transferType.value!==typeTextChat.value)
   }
   return false;
 }
-
+*/
 function shoudInputBlink():boolean {
-  const exist= chatProcessList.value.find( c => c.hasNewMsg===true);
-  if(exist){
-    
-    console.log("shoudInputBlink exist:",exist);
-    console.log("shoudInputBlink:",true);
-    return true;
-  }
+  const exist = codesList.value.find( c => c.newArrival===true);
+  if(exist) return true;
   return false;
 }
 
@@ -283,6 +303,10 @@ function onInput(event:Event) {
   }
 }
 */
+function onSavePathInput(el:HTMLElement){
+  savePathTmp.value=(el as HTMLInputElement).value ;
+}
+
 function onKeydown(event: KeyboardEvent) {
 
   if (event.ctrlKey || event.metaKey) return;
@@ -306,12 +330,17 @@ function newProcess(){
   crocCode.value="";
   memo.value="";
   hasWarned.value=false;
+  document.getElementById("inputCode")?.focus();
 }
 function toggleFileMode() {
   isFolder.value = false;
 } 
 function toggleFolderMode() {
   isFolder.value = true;
+}
+function onClickFileTab(){
+  if (transferType.value!==typeSend.value || transferType.value!==typeReceive.value) newProcess();
+  transferType.value=typeFileTrans.value;
 }
 function onClickFileSend(){
   if (transferType.value!==typeSend.value) newProcess();
@@ -423,10 +452,10 @@ function msgHasNewMsgStatusGet(code:string):boolean {
   return false;
 }
 */
-function msgHasNewMsgStatusSet(code:string,status:boolean) {
-  const exist= chatProcessList.value.find( c => c.croc_code == code);
+function newArrivalStatusSet(code:string,type:string,status:boolean) {
+  const exist = type===typeTextChat.value ? chatProcessList.value.find( c => c.croc_code == code && c.type===type) : fileProcessList.value.find(c => c.croc_code===code && c.type===type);
   if(exist){
-    exist.hasNewMsg=status;
+    exist.newArrival=status;
   }
 }
 // 更新最后一条发送信息是否已收到。
@@ -453,7 +482,7 @@ function msgAddProcess(code:string,memo:string){
       type:typeTextChat.value,
       isListening:false,
       isChatEstablished:false,
-      hasNewMsg:false,
+      newArrival:false,
       msgList:[]
     })
   }
@@ -470,7 +499,8 @@ function fileTransProcessUpdate(code:string,type:string,files:fileItem[]){
   
   const exist= fileProcessList.value.find( c => c.croc_code == code && c.type==type);
   if(!exist){
-    darkAlert("错误：更新文件传输态时，找不到对应进程信息\n\n");
+    //darkAlert("错误：更新文件传输态时，找不到对应进程信息\n\n");
+    console.log("错误：更新文件传输态时，找不到对应进程信息");
     return;
   }
   exist.files=files;
@@ -479,7 +509,8 @@ function fileTransStatusUpdate(code:string,type:string,transStatus:string){
   
   const exist= fileProcessList.value.find( c => c.croc_code == code && c.type==type);
   if(!exist){
-    darkAlert("错误：更新文件传输态时，找不到对应进程信息\n\n");
+    //darkAlert("错误：更新文件传输态时，找不到对应进程信息\n\n");
+    console.log("错误：更新文件传输态时，找不到对应进程信息");
     return;
   }
   exist.status=transStatus;
@@ -497,14 +528,15 @@ function fileTransProcessAdd(code:string,type:string,memo:string,in_files:fileIt
   console.log("fileTransProcessAdd,exist:",exist);
 
   if(!exist){
-    const copyFiles=Array.isArray(in_files) ?  [...in_files] : [];
-    console.log("in if(!exist)");
+    //const copyFiles=Array.isArray(in_files) ?  [...in_files] : [];
     fileProcessList.value.push({
       croc_code:code,
       type:type,
       memo:memo,
       status:"Pending",
-      files:copyFiles
+      newArrival:false,
+      savePath: type===typeReceive.value ? savePath.value : "" ,
+      files:in_files
     });
   }
 
@@ -523,7 +555,7 @@ async function selectSaveFolder() {
     title: "选择保存目录/Select Save Folder",
   });
   if (typeof selected === "string") {
-    savePath.value = selected;
+    savePathTmp.value = selected;
   }
   console.log(selected);
 }
@@ -585,10 +617,12 @@ async function receiveText() {
     darkAlert("请输入Code。\nEnter Code first.\n\n");
     return;
   }
-  await invoke("receive_text", {  code: crocCode.value });
+  // savePath 用于处理误在聊天界面接收文件
+  await invoke("receive_text", {  code: crocCode.value,savePath:savePath.value });
 }
 onMounted(async () => {
-  savePath.value = await homeDir();
+  //savePath.value = await homeDir();
+  savePathTmp.value = await downloadDir();
   document.addEventListener("click", clickOutsideHandler);
 
   listenSendError = await listen("croc-send-error", (event) => {
@@ -618,9 +652,9 @@ onMounted(async () => {
       // 会话是否已在列表中
       if (!fileTransIsInList(code,typeSend.value)){
         const input_memo=  "Send-"+(fileSendCount.value as number + 1); //await askUserInput("给新任务Code起个别名，以便区别查看多任务:");
-        fileTransProcessAdd(code,typeSend.value,input_memo,tempPaths.value);
-        console.log("listen croc-code,tempPaths:",tempPaths.value);
-        tempPaths.value=[];
+        fileTransProcessAdd(code,typeSend.value,input_memo,sendPathsTmp.value);
+        console.log("listen croc-code,sendPathsTmp:",sendPathsTmp.value);
+        sendPathsTmp.value=[];
         memo.value=input_memo;
         //darkAlert(memo);
       }
@@ -634,9 +668,9 @@ onMounted(async () => {
     if (fileTransIsInList(progress.croc_code,typeSend.value)){
       fileTransProcessUpdate(progress.croc_code,typeSend.value,progress.files);
     } else {
-      tempPaths.value=progress.files;
+      sendPathsTmp.value=progress.files;
 
-      console.log("错误：文件发送进度更新，未找到对应进程会话,tempPaths:",tempPaths.value);
+      console.log("错误：文件发送进度更新，未找到对应进程会话,sendPathsTmp:",sendPathsTmp.value);
     }
     // 是当前传输进程才更新，否则会混乱。
 
@@ -708,6 +742,11 @@ onMounted(async () => {
           const input_memo= "Receive-"+(fileReceiveCount.value as number + 1); // await askUserInput("给新任务Code起个别名，以便区别查看多任务:");
           fileTransProcessAdd(pr.croc_code,typeReceive.value,input_memo,pr.files);
           memo.value=input_memo;
+          // if receive files at TextChat tab
+          if(transferType.value!==typeReceive.value){
+            newArrivalStatusSet(pr.croc_code,typeReceive.value ,true);
+            console.log("File newArrival:",true);
+          }
     }
     console.log("Receive progress update:", pr.files);
   });
@@ -728,6 +767,14 @@ onMounted(async () => {
     console.log("Croc receive success:", fileProcessList.value);
   });
 
+  listenReceiveFileDir= await listen("croc-receive-file-dir", (event) => {
+    const msg= event.payload as emitInfo;
+    //receiveStatus.value="Received all"
+
+    darkAlert("Code; "+msg.croc_code+"\n\n"+ msg.info+"\n\n");
+
+    console.log(msg.info );
+  });
   listenReceiveStatus = await listen("croc-receive-file-status", (event) => {
     const st= event.payload as emitInfo;
     //receiveStatus.value=st.info;
@@ -735,11 +782,13 @@ onMounted(async () => {
       darkAlert("错误：更新Receive file状态时，Code为空。");
       return;
     }
+    /*
     if (!fileTransIsInList(st.croc_code,typeReceive.value)){
           const input_memo= "Receive-"+(fileReceiveCount.value as number + 1); // await askUserInput("给新任务Code起个别名，以便区别查看多任务:");
           fileTransProcessAdd(st.croc_code,typeReceive.value,input_memo,[]);
           memo.value=input_memo;
     }
+    */
     fileTransStatusUpdate(st.croc_code,typeReceive.value,st.info);
     console.log("Overall receive status update:", st);
   });
@@ -763,7 +812,7 @@ onMounted(async () => {
     msgAdd(code,inputText.value,"To");
 
     inputText.value="";
-    darkAlert("Code: "+code+"\n\n聊天已就绪，把Code发给对方开始聊天。\n【Code已复制，直接粘贴】\n\nChat ready, provide the Code to recipient to chat.\n【Code copied to clipboard】");
+    //darkAlert("Code: "+code+"\n\n聊天已就绪，把Code发给对方开始聊天。\n【Code已复制，直接粘贴】\n\nChat ready, provide the Code to recipient to chat.\n【Code copied to clipboard】");
     //darkAlert(memo);
     console.log("Received croc code:", crocCode.value);
   });
@@ -812,10 +861,15 @@ onMounted(async () => {
     // set isListenning status to false
     msgListeningStatusSet(msg.croc_code,false);
     // set hasNewMsg status to true
-    if(msg.croc_code!==crocCode.value){
-      msgHasNewMsgStatusSet(msg.croc_code,true);
-      console.log("hasNewMsg:",true);
+    if(msg.croc_code!==crocCode.value || transferType.value!==typeTextChat.value){
+      newArrivalStatusSet(msg.croc_code,typeTextChat.value ,true);
+      console.log("newArrival:",true);
     }
+    // 如果transferType不是‘TextChat’，则说明是user在FileReceive界面接收了Text.应该切换到TextChat界面
+    //if (transferType!==typeTextChat.value){
+    //  transferType.value=typeTextChat.value;
+    //  switchTab();
+    //}
     console.log(msg);
   });
 
@@ -871,6 +925,7 @@ onBeforeUnmount(() => {
   listenReceiveFileProgress?.();
 //  listenReceiveFileDone?.();
   listenReceiveFileSuccess?.();
+  listenReceiveFileDir?.();
   listenReceiveStatus?.();
   listenSendTextSuccess?.();
   listenSendTextStatus?.();
@@ -889,7 +944,7 @@ onBeforeUnmount(() => {
       <div class="col-5 mb-0" style="margin-bottom:0px;padding-bottom:0px;" >
         <ul class="nav nav-tabs mb-0 " id="topTab" role="tablist">
           <li class="nav-item" role="presentation">
-            <button class="nav-link active"  style="margin-left:10px;"  id="file-tab" data-bs-toggle="tab" data-bs-target="#file-pane" type="button" role="tab">
+            <button class="nav-link active" @click="onClickFileTab" style="margin-left:10px;"  id="file-tab" data-bs-toggle="tab" data-bs-target="#file-pane" type="button" role="tab">
               文件传输<br>File Transfer
             </button>
           </li>
@@ -942,7 +997,7 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
               :data-code="code.croc_code"
               :data-memo="code.memo"
                class="list-group-item list-group-item-action text-white bg-secondary" 
-               :class="{'active-row': code.type===transferType && code.croc_code===crocCode ,'blink':shoudListBlink(code.croc_code) }"
+               :class="{'active-row': code.type===transferType && code.croc_code===crocCode ,'blink': code.newArrival }"
               style="display: grid; grid-template-columns: 90px 300px 100px; cursor: pointer;">
             <div>{{ code.type }}</div>
             <div>{{ code.croc_code }}</div>
@@ -1034,7 +1089,7 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
                   <div class="col-9 mb-3">
                     <div class="input-group mb-0 mt-0" >
                       <span class="input-group-text text-white bg-secondary" id="">保存到/SaveTo</span>
-                      <input type="text" class="form-control" v-model="savePath" title="接收文件的保存位置/Where to save the files." >
+                      <input type="text" class="form-control" v-model="savePath" @input="onSavePathInput($event.currentTarget as HTMLElement)" title="接收文件的保存位置/Where to save the files." >
                       <button class="btn btn-success" style="width:34px; padding-left:0px; padding-right:0px;" @click="selectSaveFolder" title="点击选择保存目录。&#10;Click to select save folder.">
                         <img src="/assets/folder.svg"  width="24" height="24" alt="Icon">
                       </button>

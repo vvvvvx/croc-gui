@@ -241,6 +241,16 @@ async fn stop_chat_listener(
     }
     Ok(())
 }
+
+// fn get_run_dir() -> String {
+//     std::env::current_exe()
+//         .unwrap()
+//         .parent()
+//         .unwrap()
+//         .to_string_lossy()
+//         .into_owned()
+// }
+
 fn get_code(text: &str) -> Option<String> {
     RE_CODE
         .captures(text)
@@ -440,7 +450,7 @@ fn emit_exit_info(window: tauri::Window, oper_type: &str, code: String, status_c
                 emit_receive_signal(
                     window,
                     "croc-receive-error",
-                    "网络连接错误，请重试。重试多次无效，请更换Code。\nNetwork error,retry. If trying again and not, change the Code if  \n\n",
+                    "网络连接错误，请重试。重试多次无效，请更换Code。\nNetwork error,retry. If trying again and not, change the Code. \n\n",
                 );
             }
         }
@@ -681,7 +691,7 @@ async fn send_files(
             //     }
             // }
         }
-
+        /*
         if let Some(stdout) = child.stdout.take() {
             let mut reader = io::BufReader::new(stdout);
             let mut buffer = [0u8; 4096];
@@ -745,6 +755,7 @@ async fn send_files(
                 }
             }
         }
+        */
         let status = child.wait().expect("Command wasn't running");
 
         if status.success() {
@@ -849,6 +860,9 @@ async fn receive_files(
 
         // 处理 croc 输出
 
+        //let mut full_out="".to_string(); //for stdout
+        let mut full_err="".to_string(); //for stderr
+
         if let Some(stderr) = child.stderr.take() {
             let mut reader = io::BufReader::new(stderr);
             let mut buffer = [0u8; 4096];
@@ -856,7 +870,7 @@ async fn receive_files(
                 match reader.read(&mut buffer) {
                     Ok(0) => break, // EOF
                     Ok(n) => {
-                        let output = String::from_utf8_lossy(&buffer[..n]);
+                        let output = String::from_utf8_lossy(&buffer[..n]).to_string();
                         println!("croc output: {output}");
 
                         if let Some(status) = get_status(&output) {
@@ -906,6 +920,8 @@ async fn receive_files(
                                 .unwrap();
                             // return "Repeated sending.".to_string();
                         }
+
+                        full_err+=output.as_str();
                     }
                     Err(err) => {
                         eprintln!("Error reading stdout: {err}");
@@ -914,6 +930,7 @@ async fn receive_files(
                 }
             }
         }
+        /*
         if let Some(stdout) = child.stdout.take() {
             let mut reader = io::BufReader::new(stdout);
             let mut buffer = [0u8; 4096];
@@ -921,7 +938,7 @@ async fn receive_files(
                 match reader.read(&mut buffer) {
                     Ok(0) => break, // EOF
                     Ok(n) => {
-                        let output = String::from_utf8_lossy(&buffer[..n]);
+                        let output = String::from_utf8_lossy(&buffer[..n]).to_string();
                         println!("croc output: {output}");
 
                         if let Some(status) = get_status(&output) {
@@ -966,6 +983,8 @@ async fn receive_files(
                                 .unwrap();
                             // return "Repeated sending.".to_string();
                         }
+
+                        full_out+=output.as_str();
                     }
                     Err(err) => {
                         eprintln!("Error reading stdout: {err}");
@@ -974,17 +993,32 @@ async fn receive_files(
                 }
             }
         }
+        */
+        let mut stdout = child.stdout.take().unwrap();
+        let mut stdout_buf = Vec::new();
+        stdout.read_to_end(&mut stdout_buf).unwrap();
+        let full_out = String::from_utf8_lossy(&stdout_buf).to_string();
+
         let status = child.wait().expect("Command wasn't running");
 
         if status.success() {
-            // 传输完成，强制将所有文件状态更新为100%
-            replace_completed_percent(&mut files);
-            window.emit("croc-receive-file-progress", Some(EmitProgress{croc_code:code_str.clone(),files: files.clone()}))
-                .unwrap();
+            // 如果full_out是空，其实是接收的文件。
+            if full_out.is_empty(){
+                // 传输完成，强制将所有文件状态更新为100%
+                replace_completed_percent(&mut files);
+                window.emit("croc-receive-file-progress", Some(EmitProgress{croc_code:code_str.clone(),files: files.clone()}))
+                    .unwrap();
 
-            window
-                .emit("croc-receive-file-success", Some(EmitInfo{croc_code:code_str.clone(),info: "所有文件已成功接收\nAll files received successfully".to_string()}))
-                .unwrap();
+                window
+                    .emit("croc-receive-file-success", Some(EmitInfo{croc_code:code_str.clone(),info: "所有文件已成功接收\nAll files received successfully".to_string()}))
+                    .unwrap();
+            }else {
+                //如果full_out不是空，实际是接收的text,不是file
+                window
+                    .emit("croc-receive-text-msg", Some(EmitInfo{croc_code:code_str.clone(),info: full_out.to_string()}))
+                    .unwrap();
+
+            }
         } else {
             emit_exit_info(window.clone(), "receive", code_str.clone(), status.code().unwrap()); 
             // window
@@ -1114,6 +1148,7 @@ async fn send_text(
                 }
             }
         }
+        /*
         if let Some(stdout) = child.stdout.take() {
             let mut reader = io::BufReader::new(stdout);
             let mut buffer = [0u8; 4096];
@@ -1155,7 +1190,7 @@ async fn send_text(
                 }
             }
         }
-
+        */
         // if let Some(status) = get_status(&full_output) {
         //     // println!("Extracted status: {}", status);
         //     window
@@ -1165,7 +1200,6 @@ async fn send_text(
         let status = child.wait().expect("Command wasn't running");
 
         if status.success() {
-            // 传输完成，强制将所有文件状态更新为100%
             window
                 .emit("croc-send-text-success", Some(EmitInfo{croc_code:code_str.clone().to_string(),info: msg}))
                 .unwrap();
@@ -1191,7 +1225,8 @@ async fn send_text(
 #[tauri::command]
 async fn receive_text(
     window: tauri::Window,
-    code: String, // 传输代码Code
+    code: String,      // 传输代码Code
+    save_path: String, // 用于处理误在聊天界面接收文件
 ) -> Result<(), String> {
     if code.trim().is_empty() {
         window
@@ -1202,15 +1237,38 @@ async fn receive_text(
             .unwrap();
         return Ok(());
     }
+    if save_path.trim().is_empty() {
+        window
+            .emit(
+                "croc-receive-error",
+                Some("须输入保存路径,请输入保存路径\nSave path is empty".to_string()),
+            )
+            .unwrap();
+        return Ok(());
+    }
     let mut croc_args: Vec<String> = vec![];
     // 构建 croc 命令参数
     croc_args.push("--yes".to_string());
+    croc_args.push("--out".to_string());
+
+    if !is_dir(save_path.as_str()) {
+        window
+            .emit(
+                "croc-receive-error",
+                Some("错误的保存路径。\nWrong save path.".to_string()),
+            )
+            .unwrap();
+        return Ok(());
+    }
+    croc_args.push(save_path);
+
     if OS == "windows" {
         croc_args.push(code.clone())
     }
 
     println!("Running croc with args: {croc_args:?}");
     let code2 = code.clone();
+    let mut files: Vec<FileItem> = vec![];
     tokio::task::spawn_blocking(move || {
         #[cfg(not(windows))]
         let mut child: Child = Command::new("croc")
@@ -1234,7 +1292,6 @@ async fn receive_text(
         let code_str = code2.trim().to_string();
         // 处理 croc 输出
         let mut full_output="".to_string();
-
         if let Some(stderr) = child.stderr.take() {
             let mut reader = io::BufReader::new(stderr);
             let mut buffer = [0u8; 4096];
@@ -1267,6 +1324,41 @@ async fn receive_text(
                             window
                                 .emit("croc-receive-error", Some("无内容可接收或Code冲突,等会儿再试或换个Code重试。\nNo content to receive or Code conflict,waiting or change the Code.".to_string()))
                                 .unwrap();
+                        }
+                        // 如果错误的在Receive Text界面接收文件
+                        if let Some(progress_data) = get_progress_data(&output,"Receiving") {
+                            // println!("Extracted progress data: {:?}", progress_data);
+                            let status_str = format!(
+                                "{}: {} {} {}",
+                                progress_data.progress_type,
+                                progress_data.percentage,
+                                progress_data.progress,
+                                progress_data.time
+                            );
+                            if !is_contains_file(&files,&progress_data.filename){
+                                files.push(FileItem{
+                                    file:progress_data.filename.clone(),
+                                    status:status_str.clone(),
+                                    is_dir:false,
+                                });
+                            } else{
+                                update_file_status(&mut files, &progress_data.filename, &status_str);
+                            }
+
+                            // println!("files: {:?}", files);
+                            // 发送更新后的文件状态列表到前端
+                            window
+                                .emit("croc-receive-file-progress", Some(EmitProgress{croc_code:code_str.clone(),files: files.clone()}))
+                                .unwrap();
+
+                            // if !sent_notify {
+                            //     sent_notify=true;
+                            //     let save_path=get_run_dir();
+                            //     window
+                            //         .emit("croc-receive-file-dir", Some(EmitInfo{croc_code:code_str.clone(),info: "你误在聊天界面接收了文件！\n\n文件保存位置：".to_string()+save_path.as_str()}))
+                            //         .unwrap();
+                            //
+                            // }
                         }
                         full_output+=output.as_str();
                     }
@@ -1325,7 +1417,8 @@ async fn receive_text(
         let mut stdout = child.stdout.take().unwrap();
         let mut stdout_buf = Vec::new();
         stdout.read_to_end(&mut stdout_buf).unwrap();
-        let stdout_str = String::from_utf8_lossy(&stdout_buf);
+        // croc send --text 时，正文在stdout
+        let full_out= String::from_utf8_lossy(&stdout_buf).to_string();
 
         // if let Some(msg) = get_text_msg(&full_output) {
         //     // println!("Extracted msg: {}", msg);
@@ -1342,10 +1435,27 @@ async fn receive_text(
         let status = child.wait().expect("Command wasn't running");
 
         if status.success() {
-            // 传输成功，则消息正文就是stdout_str
-            window
-                .emit("croc-receive-text-msg", Some(EmitInfo{croc_code:code_str.clone(),info: stdout_str.to_string()}))
-                .unwrap();
+            //如果full_out是空，实际是接收的file,而非text
+            if full_out.is_empty(){
+                // 传输完成，强制将所有文件状态更新为100%
+                replace_completed_percent(&mut files);
+                window.emit("croc-receive-file-progress", Some(EmitProgress{croc_code:code_str.clone(),files: files.clone()}))
+                    .unwrap();
+
+                window
+                    .emit("croc-receive-file-success", Some(EmitInfo{croc_code:code_str.clone(),info: "所有文件已成功接收\nAll files received successfully".to_string()}))
+                    .unwrap();
+                // let save_path=get_run_dir();
+                // window
+                //     .emit("croc-receive-file-dir", Some(EmitInfo{croc_code:code_str.clone(),info: "你误在聊天界面接收了文件！\n\n文件保存位置：".to_string()+save_path.as_str()}))
+                //     .unwrap();
+            }else {
+                //如果full_out不是空，实际是接收的text,不是file
+                window
+                    .emit("croc-receive-text-msg", Some(EmitInfo{croc_code:code_str.clone(),info: full_out.to_string()}))
+                    .unwrap();
+
+            }
             // window
             //     .emit("croc-receive-text-success", Some(EmitInfo{croc_code:code_str.clone(),info: "receive success".to_string()}))
             //     .unwrap();
