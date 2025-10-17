@@ -99,9 +99,9 @@ export async function darkAlert(message: string, title = "提示"): Promise<void
         ElDialog,
         {
           modelValue: true,
-          closeOnClickModal: true,
-          closeOnPressEscape: true,
-          showClose: false,
+          closeOnClickModal: false,
+          closeOnPressEscape: false,
+          showClose: true,
           customClass: "dark-dialog",
           style:` 
             width: 500px; 

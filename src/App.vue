@@ -7,6 +7,8 @@ import { listen,UnlistenFn } from "@tauri-apps/api/event";
 import { getVersion } from '@tauri-apps/api/app';
 //import { ElMessageBox } from "element-plus";
 import { darkAlert } from "./utils/dialog";
+//import { loadConfig,saveConfig } from "./utils/configManager";
+//import { AppConfig } from "./config";
 //import { Command } from "@tauri-apps/plugin-shell";
 //import path from "@tauri-apps/api/path";
 //import fileIcon from "./assets/file.svg";
@@ -60,6 +62,20 @@ interface Process { //for droplist
   newArrival:boolean // if there are new message or files ，for  notification
 }
 
+interface AppConfig  {
+  send:{
+    transfers: number,
+    zip: boolean,
+    exclude: String, 
+  },
+  overwrite: boolean,
+  multicast: String,
+  ip: String,
+  relay: String,
+  relay6: String,
+  pass: String,
+}
+
 const curVersion=ref(''); //当前版本号
 const latestVersion=ref(''); //最新版本号
 const latestVersionDesc=ref(''); //最新版本描述
@@ -70,6 +86,7 @@ const typeSend=ref("FileSend");
 const typeReceive=ref("FileReceive");
 const typeTextChat=ref("TextChat");
 const typeFileTrans=ref("FileTrans");
+
 const isFolder = ref(false); // File or Folder mode
 const hasWarned = ref(false);// custom Code warning,just once
 //const isFileTransfer= ref(true); //FileTransfer or TextChat
@@ -88,10 +105,19 @@ const sendPathsTmp = ref<fileItem[]>([]); //在发送文件时，在生成code�
 const dropdownCodesListOpen = ref(false);
 const wrapperRef = ref<HTMLElement | null>(null);
 const Tab = (window as any).bootstrap?.Tab;
-//const isAskingMemo = ref<boolean>(false); // 是否在等待用户输入memo,防止在progress事件中重复弹窗。
-//const fileSendCount = computed (()=>{
-//  fileProcessList.value.filter(fp => fp.type== "FileSend").length
-//});
+const config =ref< AppConfig >( {
+        send:{
+          transfers: 8,
+          zip: false,
+          exclude: "",
+        },
+        overwrite: false,
+        multicast: "239.255.255.250",
+        ip: "",
+        relay: "",
+        relay6: "",
+        pass: "",
+      });
 
 const sendStatus= computed (()=>{   // current send status
   const fp=fileProcessList.value.find(
@@ -602,7 +628,7 @@ async function sendText() {
     return;
   }
   // 如果已发送，对方还未回复，程序处于监听状态，不能重复发送。
-  if( crocCode.value.trim().length>0 && msgListeningStatusGet(crocCode.value)){
+  if( crocCode.value.trim().length>0 && msgListeningStatusGet(crocCode.value) ){
     darkAlert("对方回复后才能发送下一条。\n Can not send before the last msg be replied.");
     return;
   }
@@ -620,9 +646,24 @@ async function receiveText() {
   // savePath 用于处理误在聊天界面接收文件
   await invoke("receive_text", {  code: crocCode.value,savePath:savePath.value });
 }
+/*
+async function onSaveConfig(){
+  await saveConfig(config.value);
+  darkAlert("Config saved.\n\n");
+}
+
+async function onReloadConfig() {
+  config.value = await loadConfig();
+}
+*/
 onMounted(async () => {
   //savePath.value = await homeDir();
   savePathTmp.value = await downloadDir();
+
+  // Read config file
+  //config.value = await loadConfig();
+  console.log( config.value);
+
   document.addEventListener("click", clickOutsideHandler);
 
   listenSendError = await listen("croc-send-error", (event) => {
@@ -959,7 +1000,7 @@ onBeforeUnmount(() => {
         <div class="input-group mb-0 mt-0" style="float:right;">
           <span class="input-group-text text-white bg-secondary" id="basic-addon2">Code</span>
 
-          <input type="text" class="form-control" :class="{ 'blink': shoudInputBlink() }" @keydown="onKeydown" id="inputCode" ref="inputCodeRef" v-model="crocCode" @focus="openDropdown" 
+          <input type="text" class="form-control" :class="{ 'blink': shoudInputBlink() }" @keydown="onKeydown" id="inputCode" ref="inputCodeRef" v-model="crocCode" @focus="openDropdown" @click="openDropdown"
           title="发送时，可输入自定义或留空自动生成传输代码&#10;接收时，输入对方的传输代码&#10;连续或来回传输时，可保持Code不变
 When sending,enter custom Code or leave it blank to generate Code automatically.
 When receiving,enter the Code provided by other side.&#10;When transmitting continuously or back and forth,the Code can be kept unchanged." 
@@ -1185,6 +1226,11 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
         </div>
         </div>
     </div>
+    <div id="settingDlg" class="custom-setting" >
+      <button @click="" id="forceKillBtn" class="btn btn-primary">保存/Save</button>
+      <button @click="" id="closeRuningAlertBtn" class="btn btn-primary">恢复/Reload</button>
+    
+    </div>
       <!-- Bootstrap JS (with Popper) -->
   </main>
 </template>
@@ -1332,4 +1378,18 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
       0%, 100% { opacity: 0; }
       80% { opacity: 0.8; }
     }
+
+    .custom-setting{
+      display: none; 
+      background:#333; 
+      position: fixed; 
+      top: 50%; 
+      left: 50%; 
+      transform: translate(-50%,-50%); 
+      padding: 20px; 
+      border: 2px solid #ccc; 
+      box-shadow: 0 0 10px rgba(0,0,0,0.2); 
+      text-align:center; 
+    }
+
 </style>
