@@ -279,7 +279,7 @@ async fn receive_files(
 
         // 处理 croc 输出
 
-        //let mut full_out="".to_string(); //for stdout
+        let mut full_out="".to_string(); //for stdout
         let mut full_err="".to_string(); //for stderr
 
         if let Some(stderr) = child.stderr.take() {
@@ -290,7 +290,7 @@ async fn receive_files(
                     Ok(0) => break, // EOF
                     Ok(n) => {
                         let output = String::from_utf8_lossy(&buffer[..n]).to_string();
-                        println!("croc output: {output}");
+                        println!("croc receive err-output: {output}");
 
                         if let Some(status) = get_status(&output) {
                             // println!("Extracted status: {}", status);
@@ -349,10 +349,39 @@ async fn receive_files(
                 }
             }
         }
-        let mut stdout = child.stdout.take().unwrap();
-        let mut stdout_buf = Vec::new();
-        stdout.read_to_end(&mut stdout_buf).unwrap();
-        let full_out = String::from_utf8_lossy(&stdout_buf).to_string();
+        if let Some(stdout) = child.stdout.take() {
+            let mut reader = io::BufReader::new(stdout);
+            let mut buffer = [0u8; 4096];
+            loop {
+                match reader.read(&mut buffer) {
+                    Ok(0) => break, // EOF
+                    Ok(n) => {
+                        let output = String::from_utf8_lossy(&buffer[..n]).to_string();
+                        println!("croc receive stdout: {output}");
+
+                        if let Some(status) = get_status(&output) {
+                            // println!("Extracted status: {}", status);
+                            window
+                                .emit("croc-receive-file-status", Some(EmitInfo{croc_code:code_str.clone(),info: status.to_string()}))
+                                .unwrap();
+                        }
+
+                        full_out+=output.as_str();
+                    }
+                    Err(err) => {
+                        eprintln!("Error reading stdout: {err}");
+                        break;
+                    }
+                }
+            }
+        }
+
+        println!("receive file full_stderr:{}",full_err);
+        println!("receive file full_stdout:{}",full_out);
+        // let mut stdout = child.stdout.take().unwrap();
+        // let mut stdout_buf = Vec::new();
+        // stdout.read_to_end(&mut stdout_buf).unwrap();
+        // let full_out = String::from_utf8_lossy(&stdout_buf).to_string();
 
         let status = child.wait().expect("Command wasn't running");
 

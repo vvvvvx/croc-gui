@@ -7,6 +7,7 @@ import { listen,UnlistenFn } from "@tauri-apps/api/event";
 import { getVersion } from '@tauri-apps/api/app';
 //import { ElMessageBox } from "element-plus";
 import { darkAlert } from "./utils/dialog";
+import * as sets from "./utils/setting";
 //import { loadConfig,saveConfig } from "./utils/configManager";
 //import { AppConfig } from "./config";
 //import { Command } from "@tauri-apps/plugin-shell";
@@ -42,6 +43,7 @@ interface fileProcess{
   status:string, // transfer result
   newArrival:boolean, //if there are new files arrive ,for notification
   savePath:String, // this Process save to where.
+  last:boolean,// if the last process before jump to other tab. display the last process when jump back.
   files:fileItem[],
 }
 // 文本发送类
@@ -52,6 +54,7 @@ interface chatProcess{
   isListening:boolean, // if true ,must wait the back msg first.
   isChatEstablished:boolean,
   newArrival: boolean, // if there are new messages,for notification
+  last:boolean,// if the last process before jump to other tab. display the last process when jump back.
   msgList:txtMsg[],
 }
 interface Process { //for droplist
@@ -59,21 +62,16 @@ interface Process { //for droplist
   type:string,
   memo:string,
   status:string,
-  newArrival:boolean // if there are new message or files ，for  notification
+  newArrival:boolean, // if there are new message or files ，for  notification
+  last: boolean // if the last process before jump to other tab. display the last process when jump back.
 }
 
-interface AppConfig  {
-  send:{
-    transfers: number,
-    zip: boolean,
-    exclude: String, 
-  },
-  overwrite: boolean,
-  multicast: String,
-  ip: String,
-  relay: String,
-  relay6: String,
-  pass: String,
+
+enum Type {
+  FileSend = "FileSend",
+  FileReceive="FileReceive",
+  TextChat="TextChat",
+  FileTrans="FileTrans"
 }
 
 const curVersion=ref(''); //当前版本号
@@ -82,17 +80,14 @@ const latestVersionDesc=ref(''); //最新版本描述
 const versionText=computed(()=>{return ((curVersion.value.toLowerCase() < latestVersion.value.toLowerCase()) && latestVersion.value!='') ?  `<a href="https://gitee.com/vvvvvx/croc-gui/releases" target="_blank" style="text-decoration:none;color:green;">有新版本/New version available.</a>`:`<a href="https://gitee.com/vvvvvx/croc-gui/releases" target="_blank" style="text-decoration:none;color:white;">Version: ${curVersion.value}</a>` ;}); //版本号显示文本
 const versionTitle=computed(()=>{return ((curVersion.value.toLowerCase() < latestVersion.value.toLowerCase()) && latestVersion.value!='') ? `当前版本：${curVersion.value}  最新版本：${latestVersion.value} \n\n新版本更新：\n${latestVersionDesc.value}`:"点击我查看版本更新信息。"}); //版本号鼠标悬停提示
 
-const typeSend=ref("FileSend");
-const typeReceive=ref("FileReceive");
-const typeTextChat=ref("TextChat");
-const typeFileTrans=ref("FileTrans");
 
 const isFolder = ref(false); // File or Folder mode
 const hasWarned = ref(false);// custom Code warning,just once
 //const isFileTransfer= ref(true); //FileTransfer or TextChat
 const crocCode = ref<string>(""); // Croc code for transfer
 const memo = ref<string>("");// Code memo
-const transferType = ref<string>("FileSend");// FileSend | FileReceive | TextChat
+const transferType = ref<string>(Type.FileSend as string);// FileSend | FileReceive | TextChat
+const remFileTab = ref<string>(Type.FileSend as string); // when leave FileTab,remember FileSend or FileReceive;
 const waitingCodesList = ref<string[]>([]); //Croc codes which are waiting for receiving
 //const savePath=ref<string>(""); // the directory to save the received files
 const savePathTmp=ref<string>(""); // the directory to save the received files
@@ -105,38 +100,40 @@ const sendPathsTmp = ref<fileItem[]>([]); //在发送文件时，在生成code�
 const dropdownCodesListOpen = ref(false);
 const wrapperRef = ref<HTMLElement | null>(null);
 const Tab = (window as any).bootstrap?.Tab;
-const config =ref< AppConfig >( {
-        send:{
-          transfers: 8,
-          zip: false,
-          exclude: "",
-        },
+
+const config =ref< sets.AppConfig >( {
+        transfers: 8,
+        zip: false,
+        exclude: "",
         overwrite: false,
-        multicast: "239.255.255.250",
+        multicast: "",
         ip: "",
+        local: false,
         relay: "",
         relay6: "",
-        pass: "",
+        relay_passwd: "",
+        proxy_socks5: "",
+        proxy_http: "",
       });
 
 const sendStatus= computed (()=>{   // current send status
   const fp=fileProcessList.value.find(
-    p => p.croc_code === crocCode.value && p.type == typeSend.value
+    p => p.croc_code === crocCode.value && p.type == Type.FileSend
   );
   return fp ? fp.status: "";
 });
 const receiveStatus= computed (()=>{   // current receive status
   const fp=fileProcessList.value.find(
-    p => p.croc_code === crocCode.value && p.type == typeReceive.value
+    p => p.croc_code === crocCode.value && p.type == Type.FileReceive
   );
   return fp ? fp.status: "";
 });
 const fileReceiveCount = computed (()=>{
-  return fileProcessList.value.filter(fp => fp.type== typeReceive.value).length;
+  return fileProcessList.value.filter(fp => fp.type== Type.FileReceive).length;
 });
 
 const fileSendCount = computed (()=>{
-  return fileProcessList.value.filter(fp => fp.type== typeSend.value).length;
+  return fileProcessList.value.filter(fp => fp.type== Type.FileSend).length;
 });
 
 const textChatCount = computed (()=>{
@@ -153,7 +150,8 @@ const codesList = computed<Process[]>(()=> { //下拉框显示内容
     type: fp.type,  // TextChat / FileSend / FileReceive
     memo: fp.memo,
     status:fp.status,
-    newArrival:fp.newArrival
+    newArrival:fp.newArrival,
+    last: fp.last
   }));
 
   // 再把 chatProcessList 转换成 Process
@@ -162,7 +160,8 @@ const codesList = computed<Process[]>(()=> { //下拉框显示内容
     type: cp.type,  // TextChat / FileSend / FileReceive
     memo: cp.memo,
     status:"",
-    newArrival:cp.newArrival
+    newArrival:cp.newArrival,
+    last: cp.last
   }));
 
   // 合并数组
@@ -172,7 +171,7 @@ const codesList = computed<Process[]>(()=> { //下拉框显示内容
 // the directory to save the received files
 const savePath= computed<string>(()=> {
   const fp=fileProcessList.value.find(
-    p => p.croc_code === crocCode.value && p.type == typeReceive.value
+    p => p.croc_code === crocCode.value && p.type == Type.FileReceive
   );
   console.log("savePath:",fp ? fp.savePath: savePathTmp.value);
   console.log("savePathTmp:",savePathTmp.value);
@@ -185,7 +184,7 @@ const savePath= computed<string>(()=> {
 const sendPaths= computed<fileItem[]>(()=> {
   console.log("fileProcessList:",fileProcessList);
   const progress=fileProcessList.value.find(
-    p => p.croc_code === crocCode.value && p.type == typeSend.value
+    p => p.croc_code === crocCode.value && p.type == Type.FileSend
   );
   console.log("sendPaths:",progress ? progress.files : sendPathsTmp.value);
   console.log("sendPathsTmp:",sendPathsTmp.value);
@@ -194,7 +193,7 @@ const sendPaths= computed<fileItem[]>(()=> {
 
 const receivePaths = computed<fileItem[]>(() => {
   const progress=fileProcessList.value.find(
-    p => p.croc_code === crocCode.value && p.type == typeReceive.value
+    p => p.croc_code === crocCode.value && p.type == Type.FileReceive
   );
   //如果找不到进程记录，就显示临时内容。
   return progress ? progress.files : [];
@@ -250,7 +249,10 @@ async function selectFile() {
 
 
 function selectCode(li: HTMLElement) {
-  
+  // remember current Process first
+  remCurProcess();
+
+  // then change Process
   crocCode.value = li.dataset.code as string;
   memo.value=li.dataset.memo as string;
   transferType.value=li.dataset.type as string;
@@ -292,7 +294,7 @@ function shoudListBlink(code:string):boolean {
   const exist= chatProcessList.value.find( c => c.croc_code == code && c.newArrival);
   if(exist){
     console.log("shoudListBlink:",exist.croc_code!==crocCode.value)
-    return (exist.croc_code!==crocCode.value || transferType.value!==typeTextChat.value)
+    return (exist.croc_code!==crocCode.value || transferType.value!==Type.TextChat)
   }
   return false;
 }
@@ -358,28 +360,50 @@ function newProcess(){
   hasWarned.value=false;
   document.getElementById("inputCode")?.focus();
 }
+// switch to send files
 function toggleFileMode() {
   isFolder.value = false;
 } 
+// switch to send folders
 function toggleFolderMode() {
   isFolder.value = true;
 }
 function onClickFileTab(){
-  if (transferType.value!==typeSend.value || transferType.value!==typeReceive.value) newProcess();
-  transferType.value=typeFileTrans.value;
+  // newProcess();
+  // remember current Process first at this Tab.
+  remCurProcess();
+  transferType.value=remFileTab.value;
+  //switchTab();
+  // reload the last Process at new Tab
+  reloadLastProcess(transferType.value);
+  newArrivalStatusSet(crocCode.value,transferType.value,false);
+  
 }
 function onClickFileSend(){
-  if (transferType.value!==typeSend.value) newProcess();
-  transferType.value=typeSend.value;
+  // remember current Process first at this Tab.
+  remCurProcess();
+  transferType.value=Type.FileSend ;
+  console.log("onClickFileTab transferType:",transferType.value);
+  // reload the last Process at new Tab
+  reloadLastProcess(transferType.value);
+  newArrivalStatusSet(crocCode.value,transferType.value,false);
 }
 function onClickFileReceive(){
-  if (transferType.value!==typeReceive.value) newProcess();
-  transferType.value=typeReceive.value;
+  // remember current Process first at this Tab.
+  remCurProcess();
+  transferType.value=Type.FileReceive ;
+  // reload the last Process at new Tab
+  reloadLastProcess(transferType.value);
+  newArrivalStatusSet(crocCode.value,transferType.value,false);
 }
 function onClickTextChat(){
-  if (transferType.value!==typeTextChat.value) newProcess();
-
-  transferType.value=typeTextChat.value;
+  console.log("onClickTextChat transferType:",transferType.value);
+  // remember current Process first at this Tab.
+  remCurProcess();
+  transferType.value=Type.TextChat ;
+  // reload the last Process at new Tab
+  reloadLastProcess(transferType.value);
+  newArrivalStatusSet(crocCode.value,transferType.value,false);
 }
 function isWaiting(code:string):boolean{
   return waitingCodesList.value.includes(code);
@@ -479,7 +503,7 @@ function msgHasNewMsgStatusGet(code:string):boolean {
 }
 */
 function newArrivalStatusSet(code:string,type:string,status:boolean) {
-  const exist = type===typeTextChat.value ? chatProcessList.value.find( c => c.croc_code == code && c.type===type) : fileProcessList.value.find(c => c.croc_code===code && c.type===type);
+  const exist = type===Type.TextChat ? chatProcessList.value.find( c => c.croc_code == code && c.type===type) : fileProcessList.value.find(c => c.croc_code===code && c.type===type);
   if(exist){
     exist.newArrival=status;
   }
@@ -500,15 +524,16 @@ function msgUpdateLastMsgStatus(code:string){
 }
 // 添加聊天任务到列表
 function msgAddProcess(code:string,memo:string){
-  const exist= chatProcessList.value.find( c => c.croc_code == code && c.type==typeTextChat.value);
+  const exist= chatProcessList.value.find( c => c.croc_code == code && c.type==Type.TextChat);
   if(!exist){
     chatProcessList.value.push({
       croc_code:code,
       memo:memo,
-      type:typeTextChat.value,
+      type:Type.TextChat,
       isListening:false,
       isChatEstablished:false,
       newArrival:false,
+      last:false,
       msgList:[]
     })
   }
@@ -561,7 +586,8 @@ function fileTransProcessAdd(code:string,type:string,memo:string,in_files:fileIt
       memo:memo,
       status:"Pending",
       newArrival:false,
-      savePath: type===typeReceive.value ? savePath.value : "" ,
+      last: false,
+      savePath: type===Type.FileReceive ? savePath.value : "" ,
       files:in_files
     });
   }
@@ -571,6 +597,37 @@ function fileTransProcessAdd(code:string,type:string,memo:string,in_files:fileIt
 function fileTransIsInList(code:string,type:string):boolean{
   const exist= fileProcessList.value.some( c => c.croc_code == code && c.type==type);
   return exist;
+}
+// remember current Process,when switch to this Tab,display it.
+function remCurProcess(){
+  const exist= transferType.value===Type.TextChat ? 
+    chatProcessList.value.find( c => c.croc_code === crocCode.value ) : 
+    fileProcessList.value.find( c => c.croc_code === crocCode.value && c.type===transferType.value);
+  
+  
+  if(exist) {
+    exist.last=true;
+    // remember the FileTab
+    if(transferType.value!==Type.TextChat) remFileTab.value=transferType.value;
+    console.log("remCurProcess:",exist);
+  } 
+}
+function reloadLastProcess(type:string){
+  
+  console.log("reloadLastProcess transferType:",type);
+  console.log("reloadLastProcess codesList:",codesList.value);
+  
+  const exist= transferType.value===Type.TextChat ? chatProcessList.value.find( c => c.last === true) : fileProcessList.value.find( c => c.last=== true && c.type===transferType.value);
+  //const exist= codesList.value.find( c => c.last===true && c.type===type);
+  if(exist){
+    transferType.value=exist.type;
+    crocCode.value=exist.croc_code;
+    memo.value=exist.memo;
+    exist.last=false;
+    console.log("reloadLastProcess:",exist);
+  }else{
+    newProcess();
+  }
 }
 // <--------file transfer function
 
@@ -646,22 +703,79 @@ async function receiveText() {
   // savePath 用于处理误在聊天界面接收文件
   await invoke("receive_text", {  code: crocCode.value,savePath:savePath.value });
 }
-/*
+async function showSettingDlg(){
+    const dlg=document.getElementById("settingDlg");
+    if(dlg) dlg.style.display="block";
+    //getById("closeRuningAlertBtn").focus();
+
+}
+function closeSettingDlg(){
+    const dlg=document.getElementById("settingDlg");
+    if(dlg) dlg.style.display="none";
+};
 async function onSaveConfig(){
-  await saveConfig(config.value);
-  darkAlert("Config saved.\n\n");
+  let ip=config.value.ip; 
+  if( !sets.isEmpty(ip) && !sets.isIP(ip)){
+    darkAlert("Wrong [Local IP] format.\n\n");
+    return;
+  }
+
+  let multicast=config.value.multicast; 
+  if( !sets.isEmpty(multicast) && !sets.isMulticast(multicast)){
+    darkAlert("Wrong [Multicast] format.\nValid range is: 224.0.0.0 - 239.255.255.255\n\n");
+    return;
+  }
+  let transfers=config.value.transfers; 
+  if( !sets.isEmpty(String(transfers)) && !sets.isNum(String(transfers))){
+    darkAlert("Wrong [Transfers] format.\n\nNot the bigger the better, recommended 4-16\n");
+    return;
+  }
+  let exclude=config.value.exclude; 
+  if( !sets.isEmpty(exclude) && !sets.isExclude(exclude)){
+    darkAlert("Wrong [Exclude] format.\n\n");
+    return;
+  }
+  let relay=config.value.relay; 
+  if( !sets.isEmpty(relay) && !sets.isIPv4Port(relay)){
+    darkAlert("Wrong [Relay-IPv4] format.\n\n");
+    return;
+  }
+  let relay6=config.value.relay6; 
+  if( !sets.isEmpty(relay6) && !sets.isIPv6Port(relay6)){
+    darkAlert("Wrong [Relay-IPv6] format.\n\n");
+    return;
+  }
+  let socks5=config.value.proxy_socks5; 
+  if( !sets.isEmpty(socks5) && !sets.isProxy(socks5)){
+    darkAlert("Wrong [socks5] format.\n\n");
+    return;
+  }
+  let http=config.value.proxy_http; 
+  if( !sets.isEmpty(http) && !sets.isProxy(http)){
+    darkAlert("Wrong [http] format.\n\n");
+    return;
+  }
+  try{
+    await sets.saveConfig(config.value);
+    darkAlert("Config saved.\n\n");
+    closeSettingDlg();
+  } catch(e){
+    darkAlert("Failed to save config.\n\n"+e+"\n\n");
+  } 
+  
 }
 
 async function onReloadConfig() {
-  config.value = await loadConfig();
+  config.value = await sets.loadConfig();
 }
+/*
 */
 onMounted(async () => {
   //savePath.value = await homeDir();
   savePathTmp.value = await downloadDir();
 
   // Read config file
-  //config.value = await loadConfig();
+  config.value = await sets.loadConfig();
   console.log( config.value);
 
   document.addEventListener("click", clickOutsideHandler);
@@ -691,9 +805,9 @@ onMounted(async () => {
       waitingCodesList.value.push(code);
     }
       // 会话是否已在列表中
-      if (!fileTransIsInList(code,typeSend.value)){
+      if (!fileTransIsInList(code,Type.FileSend)){
         const input_memo=  "Send-"+(fileSendCount.value as number + 1); //await askUserInput("给新任务Code起个别名，以便区别查看多任务:");
-        fileTransProcessAdd(code,typeSend.value,input_memo,sendPathsTmp.value);
+        fileTransProcessAdd(code,Type.FileSend,input_memo,sendPathsTmp.value);
         console.log("listen croc-code,sendPathsTmp:",sendPathsTmp.value);
         sendPathsTmp.value=[];
         memo.value=input_memo;
@@ -706,8 +820,8 @@ onMounted(async () => {
   listenSendProgress = await listen("croc-send-file-progress", (event) => {
     const progress = event.payload as emitProgress; 
     
-    if (fileTransIsInList(progress.croc_code,typeSend.value)){
-      fileTransProcessUpdate(progress.croc_code,typeSend.value,progress.files);
+    if (fileTransIsInList(progress.croc_code,Type.FileSend)){
+      fileTransProcessUpdate(progress.croc_code,Type.FileSend,progress.files);
     } else {
       sendPathsTmp.value=progress.files;
 
@@ -722,7 +836,7 @@ onMounted(async () => {
   listenStatus = await listen("croc-send-file-status", (event) => {
     const st = event.payload as emitInfo;
 
-    fileTransStatusUpdate(st.croc_code,typeSend.value,st.info);
+    fileTransStatusUpdate(st.croc_code,Type.FileSend,st.info);
     console.log("Send file status update:", st);
 
   });
@@ -747,7 +861,7 @@ onMounted(async () => {
       }
     }
 
-    fileTransStatusUpdate(message.croc_code,typeSend.value,"All sent");
+    fileTransStatusUpdate(message.croc_code,Type.FileSend,"All sent");
     //sendStatus.value="All sent"
     console.log("Croc send done:", message);
   });
@@ -760,7 +874,7 @@ onMounted(async () => {
       deleteCode(message.croc_code);
     }
 
-    fileTransStatusUpdate(message.croc_code,typeSend.value,"All sent");
+    fileTransStatusUpdate(message.croc_code,Type.FileSend,"All sent");
     console.log("Croc send success:", message);
   });
 
@@ -773,19 +887,19 @@ onMounted(async () => {
       return;
     }
       // 会话是否已在列表中
-    if (fileTransIsInList(pr.croc_code,typeReceive.value)){
-        fileTransProcessUpdate(pr.croc_code,typeReceive.value,pr.files);
+    if (fileTransIsInList(pr.croc_code,Type.FileReceive)){
+        fileTransProcessUpdate(pr.croc_code,Type.FileReceive,pr.files);
         //darkAlert(memo);
     }
     else{
           // not the first, mark a memo.
           //const input_memo= await askUserInput("给新任务Code起个别名，以便区别查看多任务:");
           const input_memo= "Receive-"+(fileReceiveCount.value as number + 1); // await askUserInput("给新任务Code起个别名，以便区别查看多任务:");
-          fileTransProcessAdd(pr.croc_code,typeReceive.value,input_memo,pr.files);
+          fileTransProcessAdd(pr.croc_code,Type.FileReceive,input_memo,pr.files);
           memo.value=input_memo;
           // if receive files at TextChat tab
-          if(transferType.value!==typeReceive.value){
-            newArrivalStatusSet(pr.croc_code,typeReceive.value ,true);
+          if(transferType.value!==Type.FileReceive){
+            newArrivalStatusSet(pr.croc_code,Type.FileReceive ,true);
             console.log("File newArrival:",true);
           }
     }
@@ -803,7 +917,7 @@ onMounted(async () => {
     const msg= event.payload as emitInfo;
     //receiveStatus.value="Received all"
 
-    fileTransStatusUpdate(msg.croc_code,typeReceive.value,"Received all");
+    fileTransStatusUpdate(msg.croc_code,Type.FileReceive,"Received all");
     darkAlert(msg.info+"\n\n");
     console.log("Croc receive success:", fileProcessList.value);
   });
@@ -823,14 +937,14 @@ onMounted(async () => {
       darkAlert("错误：更新Receive file状态时，Code为空。");
       return;
     }
-    /*
-    if (!fileTransIsInList(st.croc_code,typeReceive.value)){
+     //如果在fileTab接收Text,会导致ProcessList错误添加。但如果无此代码，则文件接收状态不会更新。
+    if (!fileTransIsInList(st.croc_code,Type.FileReceive)){
           const input_memo= "Receive-"+(fileReceiveCount.value as number + 1); // await askUserInput("给新任务Code起个别名，以便区别查看多任务:");
-          fileTransProcessAdd(st.croc_code,typeReceive.value,input_memo,[]);
+          fileTransProcessAdd(st.croc_code,Type.FileReceive,input_memo,[]);
           memo.value=input_memo;
     }
-    */
-    fileTransStatusUpdate(st.croc_code,typeReceive.value,st.info);
+    
+    fileTransStatusUpdate(st.croc_code,Type.FileReceive,st.info);
     console.log("Overall receive status update:", st);
   });
 
@@ -896,19 +1010,24 @@ onMounted(async () => {
         const input_memo=  "Chat-"+(textChatCount.value as number + 1); //await askUserInput("给新任务Code起个别名，以便区别查看多任务:");
         msgAddProcess(msg.croc_code,input_memo);
         memo.value=input_memo;
+        // 如果是FileReceive界面接收的文本，则在fileProcessList中删除同Code项
+        if(transferType.value===Type.FileReceive){
+          const index=fileProcessList.value.findIndex(fp => fp.croc_code===msg.croc_code && fp.type===Type.FileReceive );
+          if(index!==-1) fileProcessList.value.splice(index,1);
+        }
       } 
     // record the msg
     msgAdd(msg.croc_code,msg.info,"From");
     // set isListenning status to false
     msgListeningStatusSet(msg.croc_code,false);
     // set hasNewMsg status to true
-    if(msg.croc_code!==crocCode.value || transferType.value!==typeTextChat.value){
-      newArrivalStatusSet(msg.croc_code,typeTextChat.value ,true);
+    if(msg.croc_code!==crocCode.value || transferType.value!==Type.TextChat){
+      newArrivalStatusSet(msg.croc_code,Type.TextChat ,true);
       console.log("newArrival:",true);
     }
     // 如果transferType不是‘TextChat’，则说明是user在FileReceive界面接收了Text.应该切换到TextChat界面
-    //if (transferType!==typeTextChat.value){
-    //  transferType.value=typeTextChat.value;
+    //if (transferType!==Type.TextChat){
+    //  transferType.value=Type.TextChat;
     //  switchTab();
     //}
     console.log(msg);
@@ -940,7 +1059,7 @@ watch(chatText,async ()=>{
   }
 });
 watch(memo,(newMemo)=> {
-  if(transferType.value===typeTextChat.value){
+  if(transferType.value===Type.TextChat){
 
     const item= chatProcessList.value.find( p => p.croc_code=== crocCode.value );
     if(item){
@@ -1020,7 +1139,7 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
         <ul v-show="dropdownCodesListOpen"
             ref="dropdownRef"
             class="list-group position-absolute w-100"
-            style="z-index: 9001; top: 100%; left: 0;">
+            style="z-index: 1001; top: 100%; left: 0;">
 
           <!-- 表头 -->
           <div class="list-group-item bg-secondary text-white"
@@ -1216,20 +1335,122 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
     </div>
 
     <div class="  text-white">
-        <div class="row justify-content-end">
+      <div class="row">
+        <div class="col-4 justify-content-begin">
+          <a class="text-success" @click="showSettingDlg" style="font-weight:bold;cursor:pointer">Advanced Settings</a>
+        </div>
+
+        <div class="col-8">
+          <div class="row justify-content-end">
             <div class="col-auto">
-            <span title="点我访问软件主页，可提Bug或建议。"> 
-              <a href="https://gitee.com/vvvvvx/croc-gui" style="color:inherit;text-decoration:none;" target="_blank">Developed by Viaco.</a>&emsp; Email : 106324221@qq.com&emsp;
-            </span>
-            <span :class="[(curVersion < latestVersion && latestVersion!='') ?  'blink':'']" v-html="versionText" :title="versionTitle">
-            </span>
+              <span title="点我访问软件主页，可提Bug或建议。"> 
+                <a href="https://gitee.com/vvvvvx/croc-gui" style="color:inherit;text-decoration:none;" target="_blank">Developed by Viaco.</a>&emsp; Email : 106324221@qq.com&emsp;
+              </span>
+              <span :class="[(curVersion < latestVersion && latestVersion!='') ?  'blink':'']" v-html="versionText" :title="versionTitle">
+              </span>
+            </div>
+          </div>
         </div>
-        </div>
+      </div>
     </div>
     <div id="settingDlg" class="custom-setting" >
-      <button @click="" id="forceKillBtn" class="btn btn-primary">保存/Save</button>
-      <button @click="" id="closeRuningAlertBtn" class="btn btn-primary">恢复/Reload</button>
-    
+      <fieldset class="border p-3 rounded mb-3 mt-0 pt-1 pb-1">
+        <legend class="float-none w-auto px-0 text-white mb-0 fs-6">Advanced Settings</legend>
+
+        <div class="row">
+          <div class="d-flex p-1">
+            <div class="form-check mb-1 mt-0" style="padding-right:20px;" title="强制使用本地连接&#10;Force to use only local connections" >
+              <label class="form-check-label text-white " for="local" >Force Local Connections</label>
+              <input type="checkbox" id="local"  v-model="config.local"  class=" form-check-input"   title="" placeholder="">
+            </div>
+            <div class="form-check mb-1 mt-0" title="目录中有同名文件时自动覆盖或自动断点续传&#10;Auto resume or overwrite when there are same files in the dir." >
+              <label class="form-check-label text-white " for="overwrite" >Auto Resume/Overwrite</label>
+              <input type="checkbox" id="overwrite"  v-model="config.overwrite"  class=" form-check-input"   title="" placeholder="">
+            </div>
+          </div>
+          <div class="col-6 p-1">
+            <div class="input-group mb-1 mt-0" title="用于局域网自动发现，进行本地连接快速传输，默认239.255.255.250&#10;Use for local discover to connect locally,default: 239.255.255.250 ">
+              <span class="input-group-text text-white bg-secondary  mb-0 mt-0 p-1" >Multicast</span>
+              <input type="text" v-model="config.multicast"  class="form-control mb-0 mt-0 p-1"   title="用于局域网自动发现，进行本地连接快速传输，默认239.255.255.250&#10;Use for local discover to connect locally,default: 239.255.255.250 " placeholder="def. 239.255.255.250">
+            </div>
+          </div>
+          <div class="col-6 p-1">
+            <div class="input-group mb-1 mt-0" title="本机IP&#10;Self PC's IP" >
+              <span class="input-group-text text-white bg-secondary  mb-0 mt-0 p-1" >Local IP</span>
+              <input type="text" v-model="config.ip"  class="form-control mb-0 mt-0 p-1"   title="" placeholder="">
+            </div>
+          </div>
+          <fieldset class="border p-2 rounded mb-1 pb-1 pt-1">
+            <legend class="float-none w-auto px-0 mb-0 text-white fs-6">Send Options</legend>
+            <div class="row">
+              <div class="col-12 d-flex">
+                <div class="form-check mb-1 mt-0"  title="发送前先压缩成zip&#10;Zip files before sendding." >
+                  <label class="form-check-label text-white " for="zip" >Zip Folder before sending</label>
+                  <input type="checkbox" id="zip"  v-model="config.zip"  class=" form-check-input"   title="" placeholder="">
+                </div>
+              </div>
+              <div class="col-4 " >
+                <div class="input-group mb-0 mt-0 p-0 " title="并行传输的端口数，并非越大越好，建议4-16,默认4。&#10;Number of ports to use for transfers, default 4." >
+                  <span class="input-group-text text-white bg-secondary mb-0 mt-0 p-1" >Tansfers </span>
+                  <input type="number" v-model="config.transfers"  class="form-control mb-0 mt-0 p-1"   title="" placeholder="">
+                </div>
+              </div>
+              <div class="col-8">
+                <div class="input-group mb-1 mt-0" title="发送目录时，排除文件名的特征清单，特征间以英文逗号分隔。&#10;如：'纪要,pdf' 表示文件名包含‘纪要’的或扩展名为pdf的，都不会发送。&#10;&#10;Exclude patterns when sending a directory. Separate multiple patterns with commas.&#10;Example: 'summary,pdf' means files whose names contain “summary” or have the “.pdf” extension will be excluded from sending." >
+                  <span class="input-group-text text-white bg-secondary  mb-0 mt-0 p-1" >Exclude</span>
+                  <input type="text" v-model="config.exclude"  class="form-control mb-0 mt-0 p-1"    placeholder="eg.  'docx , summary' ">
+                </div>
+              </div>
+            </div>
+          </fieldset>
+
+          <fieldset class="border p-2 rounded mb-1 pb-1 pt-1">
+            <legend class="float-none w-auto px-0 mb-0 text-white fs-6">Relay</legend>
+            <div class="col-12">
+              <div class="input-group mb-1 mt-0" title="默认使用官方中继，可能绕道海外，可自建中继。发送方和接收方须使用同一中继。&#10;&#10;By default, the official relay is used, which may route through overseas servers.&#10;You can also set up your own relay. Both sender and receiver must use the same relay." >
+                <span class="input-group-text text-white bg-secondary  mb-0 mt-0 p-1" >Relay-IPv4</span>
+                <input type="text" v-model="config.relay"  class="form-control mb-0 mt-0 p-1"   title="默认使用官方中继，可能绕道海外，可自建中继。发送方和接收方须使用同一中继。&#10;&#10;By default, the official relay is used, which may route through overseas servers.&#10;You can also set up your own relay. Both sender and receiver must use the same relay." placeholder="eg. 125.178.3.210:9009">
+              </div>
+            </div>
+            <div class="col-12">
+              <div class="input-group mb-1 mt-0" title="默认使用官方中继，可能绕道海外，可自建中继。发送方和接收方须使用同一中继。&#10;&#10;By default, the official relay is used, which may route through overseas servers.&#10;You can also set up your own relay. Both sender and receiver must use the same relay.">
+                <span class="input-group-text text-white bg-secondary  mb-0 mt-0 p-1" >Relay-IPv6</span>
+                <input type="text" v-model="config.relay6"  class="form-control mb-0 mt-0 p-1"   title="默认使用官方中继，可能绕道海外，可自建中继。发送方和接收方须使用同一中继。&#10;&#10;By default, the official relay is used, which may route through overseas servers.&#10;You can also set up your own relay. Both sender and receiver must use the same relay." placeholder="eg. [2a01:4ff:1f0:eb5d::1]:9009">
+              </div>
+            </div>
+            <div class="col-12">
+              <div class="input-group mb-1 mt-0" >
+                <span class="input-group-text text-white bg-secondary  mb-0 mt-0 p-1" >&nbsp;Password</span>
+                <input type="text" v-model="config.relay_passwd"  class="form-control mb-0 mt-0 p-1"   title="" placeholder="">
+              </div>
+            </div>
+          </fieldset>
+          <fieldset class="border p-2 rounded mb-0 pb-1 pt-1">
+            <legend class="float-none w-auto pb-0 mb-0 text-white fs-6">Proxy</legend>
+            <div class="row">
+              <div class="col-6" style="padding-left:12px;padding-right:4px;">
+                <div class="input-group mb-1 mt-0" >
+                  <span class="input-group-text text-white bg-secondary  mb-0 mt-0 p-1" >socks5</span>
+                  <input type="text" v-model="config.proxy_socks5"  class="form-control mb-0 mt-0 p-1"   title="" placeholder="eg. 125.178.3.21:9001">
+                </div>
+              </div>
+              <div class="col-6" style="padding-right:12px;padding-left:4px;">
+                <div class="input-group mb-1 mt-0" >
+                  <span class="input-group-text text-white bg-secondary  mb-0 mt-0 p-1" >http</span>
+                  <input type="text" v-model="config.proxy_http"  class="form-control mb-0 mt-0 p-1"   title="" placeholder="eg. 125.178.3.21:9000">
+                </div>
+              </div>
+            </div>
+          </fieldset>
+        </div>
+      </fieldset>
+      <div class="row">
+        <div class="col-12">
+          <button @click="onSaveConfig" id="" class="btn btn-success">&ensp;Save&ensp;</button>&nbsp;&nbsp;
+          <button @click="onReloadConfig" id="" class="btn btn-success">Reload</button>&nbsp;&nbsp;
+          <button @click="closeSettingDlg" id="btnCloseSettingDlg" class="btn btn-warning ">Cancel</button>
+        </div>
+      </div>
     </div>
       <!-- Bootstrap JS (with Popper) -->
   </main>
@@ -1385,11 +1606,14 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
       position: fixed; 
       top: 50%; 
       left: 50%; 
+      border-radius: 10px;
       transform: translate(-50%,-50%); 
       padding: 20px; 
       border: 2px solid #ccc; 
       box-shadow: 0 0 10px rgba(0,0,0,0.2); 
       text-align:center; 
+      width:60%;
+      z-index: 1002;
     }
 
 </style>

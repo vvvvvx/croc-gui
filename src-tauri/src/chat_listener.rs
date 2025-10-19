@@ -12,11 +12,8 @@ use tokio::{
     time::{sleep, Duration},
 };
 
-// #[derive(Debug, Clone, Serialize, Deserialize)]
-// struct EmitInfo {
-//     croc_code: String,
-//     info: String,
-// }
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 
 #[tauri::command]
 pub async fn start_chat_listener(
@@ -79,32 +76,6 @@ pub async fn start_chat_listener(
 
             println!("Listener stdout:{stdout_str}");
             println!("Listener stderr:{stderr_str}");
-            // if let Some(msg) = get_text_msg(&stderr_str) {
-            //     println!("Extracted msg: {}", msg);
-            //     window
-            //         .emit(
-            //             "croc-receive-text-msg",
-            //             Some(EmitInfo {
-            //                 croc_code: code_clone.clone(),
-            //                 info: msg,
-            //             }),
-            //         )
-            //         .unwrap();
-            //     running.store(false, Ordering::SeqCst);
-            // }
-            // if let Some(msg) = get_text_msg(&stdout_str) {
-            //     println!("Extracted msg: {}", msg);
-            //     window_clone
-            //         .emit(
-            //             "croc-receive-text-msg",
-            //             Some(EmitInfo {
-            //                 croc_code: code_clone.clone(),
-            //                 info: msg,
-            //             }),
-            //         )
-            //         .unwrap();
-            //     running.store(false, Ordering::SeqCst);
-            // }
 
             let status = child.wait().await;
 
@@ -123,24 +94,6 @@ pub async fn start_chat_listener(
                     running.store(false, Ordering::SeqCst);
                 }
             }
-            // match status {
-            //     Ok(status) => {
-            //         if status.success() {
-            //             // 传输完成，强制将所有文件状态更新为100%
-            //             window
-            //                 .emit(
-            //                     "croc-receive-text-success",
-            //                     Some(EmitInfo {
-            //                         croc_code: code_clone.clone(),
-            //                         info: stdout_str.to_string() + stderr_str.to_string().as_str(),
-            //                     }),
-            //                 )
-            //                 .unwrap();
-            //             running.store(false, Ordering::SeqCst);
-            //         }
-            //     }
-            //     Err(e) => {}
-            // }
             // 每 10 秒再检测一次
             sleep(Duration::from_secs(10)).await;
         }

@@ -106,7 +106,7 @@ export async function darkAlert(message: string, title = "提示"): Promise<void
           style:` 
             width: 500px; 
             text-align:center; 
-            z-index:9999;
+            z-index:1003;
             background-color:#333;
             color:#fff;`,
         },
