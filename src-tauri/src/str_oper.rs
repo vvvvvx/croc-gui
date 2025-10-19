@@ -40,6 +40,10 @@ static RE_STATUS: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(Zipping|Unzipping file|securing channel...|Connecting|connecting|Receiving\s+\(<\-\d+\.\d+\.\d+\.\d+:\d+\)|Sending\s+\(\->\d+\.\d+\.\d+\.\d+:\d+\))")
         .expect("Invalid regex for Status")
 });
+static RE_ZIP_FILENAME: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"Sending\s'([^\s%]+\.zip)'\sand\s\d+\sfolders")
+        .expect("Invalid regex for zip filename")
+});
 
 static RE_PERCENT: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\d+%").expect("Invalid regex for Percent"));
@@ -56,7 +60,11 @@ pub fn get_code(text: &str) -> Option<String> {
     // }
     // None
 }
-
+pub fn get_zip_filename(text: &str) -> Option<String> {
+    RE_ZIP_FILENAME
+        .captures(text)
+        .and_then(|caps| caps.get(1).map(|m| m.as_str().to_string()))
+}
 pub fn get_status(text: &str) -> Option<String> {
     RE_STATUS
         .captures(text)

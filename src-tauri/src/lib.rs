@@ -15,11 +15,12 @@ use crate::types::{CrocWorker, EmitInfo, EmitProgress, FileItem};
 use crate::utils::*;
 use crate::version::check_update;
 use chat_listener::{start_chat_listener, stop_chat_listener};
-use setting::{load_config, save_config};
+use setting::{load_config, save_config, ConfigState};
 //use std::fs::{self};
 use std::sync::Arc;
 use str_oper::*;
 use tauri::Emitter;
+use tauri::State;
 use tokio::sync::Mutex;
 //use std::path::Path;
 //use tauri_plugin_shell;
@@ -30,18 +31,31 @@ use std::os::windows::process::CommandExt;
 #[tauri::command]
 async fn send_files(
     window: tauri::Window,
+    state: State<'_, ConfigState>,
     mut files: Vec<FileItem>, // 需要发送的文件列表或目录
     code: String,             // 传输代码Code
     is_folder: bool,          // 是否为目录
 ) -> Result<(), String> {
-    // 构建 croc 命令参数
-    let mut croc_args = vec![
-        "--yes".to_string(),
-        "send".to_string(),
-        "--transfers".to_string(),
-        "8".to_string(),
-    ];
+    let cfg = state.0.read().unwrap().clone();
 
+    println!("send_files cfg:{cfg:?}");
+    // 构建 croc 命令参数
+    // global parameters
+    let mut croc_args = global_args(cfg.clone());
+    // send parameters
+    croc_args.push("send".to_string());
+
+    if let Some(transfers) = cfg.transfers {
+        croc_args.push("--transfers".to_string());
+        croc_args.push(transfers.to_string());
+    }
+    if !cfg.exclude.trim().is_empty() {
+        croc_args.push("--exclude".to_string());
+        croc_args.push(cfg.exclude.clone());
+    }
+    if cfg.zip {
+        croc_args.push("--zip".to_string());
+    }
     if !code.trim().is_empty() && OS == "windows" {
         croc_args.push("--code".to_string());
         croc_args.push(code.clone());
@@ -68,9 +82,10 @@ async fn send_files(
         files = insert_files_after_dir(files);
     }
     // 启动 croc 进程
-    println!("Running croc with args: {croc_args:?}");
+    println!("Send files croc with args: {croc_args:?}");
 
     let code2 = code.clone();
+    let cfg1 = cfg.clone();
     tokio::task::spawn_blocking(move || {
         #[cfg(not(windows))]
         let mut child: Child = if !code2.trim().is_empty() {
@@ -142,6 +157,12 @@ async fn send_files(
                                 .emit("croc-send-file-status", Some(EmitInfo{croc_code:code_str.clone(),info: status.to_string()}))
                                 .unwrap();
                         }
+                        if cfg.zip && is_folder{
+                        if let Some(zip)=get_zip_filename(&output){
+                            files=vec![];
+                            files.push(FileItem { file: zip.to_string(), status: "Pending".to_string(), is_dir: false });
+                        }
+                        }
                         if let Some(progress_data) = get_progress_data(&output,"Sending") {
                             // println!("Extracted progress data: {:?}", progress_data);
                             let status_str = if progress_data.progress_type=="Hashing"{
@@ -210,6 +231,7 @@ async fn send_files(
 #[tauri::command]
 async fn receive_files(
     window: tauri::Window,
+    state: State<'_, ConfigState>,
     save_path: String, // 保存路径
     code: String,      // 传输代码Code
 ) -> Result<(), String> {
@@ -231,9 +253,13 @@ async fn receive_files(
             .unwrap();
         return Ok(());
     }
-    let mut croc_args: Vec<String> = vec![];
+    // read config
+    let cfg = state.0.read().unwrap().clone();
+
     // 构建 croc 命令参数
-    croc_args.push("--yes".to_string());
+    // global parameters first
+    let mut croc_args = global_args(cfg.clone());
+    // receive parameters
     croc_args.push("--out".to_string());
 
     if !is_dir(save_path.as_str()) {
@@ -252,7 +278,7 @@ async fn receive_files(
     }
 
     // 启动 croc 进程
-    println!("Running croc with args: {croc_args:?}");
+    println!("Receive files croc with args: {croc_args:?}");
     let code2 = code.clone();
     let code_str = code2.clone();
     let mut files: Vec<FileItem> = vec![];
@@ -425,6 +451,7 @@ async fn receive_files(
 #[tauri::command]
 async fn send_text(
     window: tauri::Window,
+    state: State<'_, ConfigState>,
     msg: String,  // 要发送的信息/ Msg to send
     code: String, // 传输代码Code
 ) -> Result<(), String> {
@@ -440,9 +467,12 @@ async fn send_text(
             .unwrap();
         return Ok(());
     }
-    let mut croc_args: Vec<String> = vec![];
+    let cfg = state.0.read().unwrap().clone();
+
     // 构建 croc 命令参数
-    croc_args.push("--yes".to_string());
+    // global parameters first
+    let mut croc_args: Vec<String> = global_args(cfg.clone());
+    // send parameters
     croc_args.push("send".to_string());
     if !code.trim().is_empty() && OS == "windows" {
         croc_args.push("--code".to_string());
@@ -560,6 +590,7 @@ async fn send_text(
 #[tauri::command]
 async fn receive_text(
     window: tauri::Window,
+    state: State<'_, ConfigState>,
     code: String,      // 传输代码Code
     save_path: String, // 用于处理误在聊天界面接收文件
 ) -> Result<(), String> {
@@ -581,9 +612,11 @@ async fn receive_text(
             .unwrap();
         return Ok(());
     }
-    let mut croc_args: Vec<String> = vec![];
+    let cfg = state.0.read().unwrap().clone();
     // 构建 croc 命令参数
-    croc_args.push("--yes".to_string());
+    // global parameters first
+    let mut croc_args: Vec<String> = global_args(cfg.clone());
+    // receive parameters
     croc_args.push("--out".to_string());
 
     if !is_dir(save_path.as_str()) {
@@ -779,11 +812,16 @@ fn kill_croc_process_fn() {
 // use tauri::App;
 // use tauri::RunEvent;
 // use tauri::AppHandle;
+use crate::setting::{global_args, load_config_internal};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    //读取程序配置信息
+    let _cfg = load_config_internal();
     let app = tauri::Builder::default()
         .manage(Arc::new(Mutex::new(CrocWorker::default())))
+        //加入全局配置信息
+        .manage(ConfigState(std::sync::RwLock::new(_cfg)))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         //.plugin(tauri_plugin_shell::init())

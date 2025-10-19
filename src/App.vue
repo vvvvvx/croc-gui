@@ -358,7 +358,7 @@ function newProcess(){
   crocCode.value="";
   memo.value="";
   hasWarned.value=false;
-  document.getElementById("inputCode")?.focus();
+  //document.getElementById("inputCode")?.focus();
 }
 // switch to send files
 function toggleFileMode() {
@@ -715,7 +715,7 @@ function closeSettingDlg(){
 };
 async function onSaveConfig(){
   let ip=config.value.ip; 
-  if( !sets.isEmpty(ip) && !sets.isIP(ip)){
+  if( !sets.isEmpty(ip) && !sets.isProxy(ip)){
     darkAlert("Wrong [Local IP] format.\n\n");
     return;
   }
@@ -1190,7 +1190,7 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
             <div class="fixed-pane-container mb-0">
               <div class="header-area mb-0 pb-0">
                 <div class="row">
-                  <div class="col-2 mb-3">
+                  <div class="col-4 mb-3">
                     <div class="input-group mb-0 mt-0 ">
                       <button class="btn" @click="toggleFileMode" :class="isFolder ? 'btn-secondary' : 'btn-success btn-outline-warning' " style="width:34px; padding-left:0px;padding-right:0px;" title="切换为发送文件/Toggle to send files">
                         <img src="/assets/file.svg"  width="24" height="24" alt="Icon">
@@ -1198,13 +1198,22 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
                       <button class="btn" @click="toggleFolderMode" :class="isFolder ? 'btn-success btn-outline-warning' : 'btn-secondary' " style="width:34px; padding-left:0px; padding-right:0px;" title="切换为发送目录/Toggle to send folders">
                         <img src="/assets/folder.svg"  width="24" height="24" alt="Icon">
                       </button>
+                      &nbsp;&nbsp;&nbsp;&nbsp;
+                      <button class="btn btn-success" @click="selectFile" title="点击选择要发送的文件或目录。&#10;Click to select files or folders to send.">{{ isFolder ? 'SelectFolders' : 'SelectFiles' }}</button>
                     </div>
                   </div>
 
-                  <div class="col-7 mb-0">
-                    <button class="btn btn-success" @click="selectFile" title="点击选择要发送的文件或目录。&#10;Click to select files or folders to send.">{{ isFolder ? '选择目录/Select Folders' : '选择文件/Select Files' }}</button>
+                  <div class="col-6 mb-3 d-flex">
+                    <div class="form-check mb-0 mt-2"  title="发送前先压缩成zip&#10;Zip files before sendding." >
+                      <label class="form-check-label text-white " for="zip" >Zip</label>
+                      <input type="checkbox" id="zip"  v-model="config.zip"  class=" form-check-input"   title="" placeholder="">
+                    </div>
+                    <div class="input-group mb-0 mt-0" title="发送目录时，排除文件名的特征清单，特征间以英文逗号分隔。&#10;如：'纪要,pdf' 表示文件名包含‘纪要’的或扩展名为pdf的，都不会发送。&#10;&#10;Exclude patterns when sending a directory. Separate multiple patterns with commas.&#10;Example: 'summary,pdf' means files whose names contain “summary” or have the “.pdf” extension will be excluded from sending." >
+                      <span class="input-group-text text-white bg-secondary  " >Exclude</span>
+                      <input type="text" v-model="config.exclude"  class="form-control"    placeholder="eg.  'docx , summary' ">
+                    </div>
                   </div>
-                  <div class="col-3 mb-0 justify-content-end" style="display:flex; ">
+                  <div class="col-2 mb-0 justify-content-end" style="display:flex; ">
                     <span title="请先选择要发送的文件或目录，然后点击发送。&#10;接收完成前不能继续发送。&#10;Please select files or folders first,then click to send.&#10;Cannot send again before current transfer is done.">
                       <button class="btn btn-warning" @click="sendFiles"  :disabled="!sendPaths || sendPaths.length === 0 || isSending">发送/Send</button>
                     </span>
@@ -1375,9 +1384,9 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
             </div>
           </div>
           <div class="col-6 p-1">
-            <div class="input-group mb-1 mt-0" title="本机IP&#10;Self PC's IP" >
+            <div class="input-group mb-1 mt-0" title="本机IP,例：10.2.2.123:9009&#10;Self PC's IP, eg. 10.2.2.123:9009" >
               <span class="input-group-text text-white bg-secondary  mb-0 mt-0 p-1" >Local IP</span>
-              <input type="text" v-model="config.ip"  class="form-control mb-0 mt-0 p-1"   title="" placeholder="">
+              <input type="text" v-model="config.ip"  class="form-control mb-0 mt-0 p-1"   title="" placeholder="eg. 10.0.0.1:9009">
             </div>
           </div>
           <fieldset class="border p-2 rounded mb-1 pb-1 pt-1">
