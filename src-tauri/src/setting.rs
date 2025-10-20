@@ -9,15 +9,15 @@ pub struct ConfigState(pub RwLock<AppConfig>);
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppConfig {
     pub transfers: Option<u32>, // 多少个port同时传输
-    pub zip: bool,              // 发送前是否先打包压缩
-    pub exclude: String,        // 排除哪些文件，以逗号分隔
-    pub overwrite: bool,        // 是否自动覆盖或续传
-    pub multicast: String,      // 局域网广播范围 默认：239.255.255.250
-    pub ip: String,             // 本机IP,如果有
-    pub local: bool,            // Force local connections
-    pub relay: String,          // IP v4中继
-    pub relay6: String,         // IP v6中继
-    pub relay_passwd: String,   // 中继密码
+    // pub zip: bool,              // 发送前是否先打包压缩
+    // pub exclude: String,        // 排除哪些文件，以逗号分隔
+    pub overwrite: bool,      // 是否自动覆盖或续传
+    pub multicast: String,    // 局域网广播范围 默认：239.255.255.250
+    pub ip: String,           // 本机IP,如果有
+    pub local: bool,          // Force local connections
+    pub relay: String,        // IP v4中继
+    pub relay6: String,       // IP v6中继
+    pub relay_passwd: String, // 中继密码
     pub proxy_socks5: String,
     pub proxy_http: String,
 }
@@ -26,8 +26,8 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             transfers: Some(4),
-            zip: false,
-            exclude: "".to_string(),
+            // zip: false,
+            // exclude: "".to_string(),
             overwrite: false,
             multicast: "".to_string(),
             ip: "".to_string(),

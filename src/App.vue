@@ -43,7 +43,10 @@ interface fileProcess{
   status:string, // transfer result
   newArrival:boolean, //if there are new files arrive ,for notification
   savePath:String, // this Process save to where.
+  isFolder:boolean,// is Send folder
   last:boolean,// if the last process before jump to other tab. display the last process when jump back.
+  zip:boolean, // zip status
+  exclude:string, // exclude status
   files:fileItem[],
 }
 // 文本发送类
@@ -83,6 +86,8 @@ const versionTitle=computed(()=>{return ((curVersion.value.toLowerCase() < lates
 
 const isFolder = ref(false); // File or Folder mode
 const hasWarned = ref(false);// custom Code warning,just once
+const zip = ref(false);        // 发送前是否先打包压缩
+const exclude = ref<string>("");     // 排除哪些文件，以逗号分隔
 //const isFileTransfer= ref(true); //FileTransfer or TextChat
 const crocCode = ref<string>(""); // Croc code for transfer
 const memo = ref<string>("");// Code memo
@@ -103,8 +108,8 @@ const Tab = (window as any).bootstrap?.Tab;
 
 const config =ref< sets.AppConfig >( {
         transfers: 8,
-        zip: false,
-        exclude: "",
+        //zip: false,
+        //exclude: "",
         overwrite: false,
         multicast: "",
         ip: "",
@@ -256,7 +261,17 @@ function selectCode(li: HTMLElement) {
   crocCode.value = li.dataset.code as string;
   memo.value=li.dataset.memo as string;
   transferType.value=li.dataset.type as string;
+  
+  if(transferType.value===Type.FileSend){
+    const exist = fileProcessList.value.find(fp => fp.type===Type.FileSend && fp.croc_code === crocCode.value);
+    if(exist){
+      isFolder.value=exist.isFolder;
+      zip.value=exist.zip;
+      exclude.value=exist.exclude;
+    }
 
+  }
+  
   console.log("li-dataset:", li.dataset.code,li.dataset.memo,li.dataset.type);
   dropdownCodesListOpen.value = false; 
  
@@ -358,15 +373,19 @@ function newProcess(){
   crocCode.value="";
   memo.value="";
   hasWarned.value=false;
+  zip.value=false;
+  exclude.value="";
   //document.getElementById("inputCode")?.focus();
 }
 // switch to send files
 function toggleFileMode() {
   isFolder.value = false;
+  selectFile();
 } 
 // switch to send folders
 function toggleFolderMode() {
   isFolder.value = true;
+  selectFile();
 }
 function onClickFileTab(){
   // newProcess();
@@ -586,8 +605,11 @@ function fileTransProcessAdd(code:string,type:string,memo:string,in_files:fileIt
       memo:memo,
       status:"Pending",
       newArrival:false,
+      isFolder:isFolder.value,
       last: false,
       savePath: type===Type.FileReceive ? savePath.value : "" ,
+      zip:zip.value,
+      exclude:exclude.value,
       files:in_files
     });
   }
@@ -624,6 +646,10 @@ function reloadLastProcess(type:string){
     crocCode.value=exist.croc_code;
     memo.value=exist.memo;
     exist.last=false;
+    if (transferType.value === Type.FileSend){
+      zip.value=(exist as fileProcess).zip;
+      exclude.value=(exist as fileProcess).exclude;
+    }
     console.log("reloadLastProcess:",exist);
   }else{
     newProcess();
@@ -651,13 +677,16 @@ async function sendFiles() {
     darkAlert("上一次发送等待对方接收完成。\nThe previous sending is waiting for receiving.\n\n");
     return;
   }
+  if(!sets.isEmpty(exclude.value) && !sets.isExclude(exclude.value)) {
+    darkAlert("Exclude格式错误\nWrong [exclude] format\n\n");
+    return;
+  }
   //isSending.value = true;
   if (crocCode.value.trim()!==""){
     waitingCodesList.value.push(crocCode.value.trim());
   }
-  
   // Implement file sending logic here
-  await invoke("send_files", { files: sendPaths.value, code: crocCode.value,isFolder: isFolder.value });
+  await invoke("send_files", { files: sendPaths.value, code: crocCode.value,isFolder: isFolder.value,zip:zip.value,exclude:exclude.value });
   
 }
 async function receiveFiles() {
@@ -728,11 +757,6 @@ async function onSaveConfig(){
   let transfers=config.value.transfers; 
   if( !sets.isEmpty(String(transfers)) && !sets.isNum(String(transfers))){
     darkAlert("Wrong [Transfers] format.\n\nNot the bigger the better, recommended 4-16\n");
-    return;
-  }
-  let exclude=config.value.exclude; 
-  if( !sets.isEmpty(exclude) && !sets.isExclude(exclude)){
-    darkAlert("Wrong [Exclude] format.\n\n");
     return;
   }
   let relay=config.value.relay; 
@@ -1192,25 +1216,28 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
                 <div class="row">
                   <div class="col-4 mb-3">
                     <div class="input-group mb-0 mt-0 ">
-                      <button class="btn" @click="toggleFileMode" :class="isFolder ? 'btn-secondary' : 'btn-success btn-outline-warning' " style="width:34px; padding-left:0px;padding-right:0px;" title="切换为发送文件/Toggle to send files">
-                        <img src="/assets/file.svg"  width="24" height="24" alt="Icon">
+                      <button class="btn" @click="toggleFileMode" :class="isFolder ? 'btn-secondary' : 'btn-success btn-outline-warning' " style=" padding-left:3px;padding-right:3px;" title="选择要发送的文件&#10;Select files to send.">
+                        <img src="/assets/file.svg"  width="24" height="24" alt="Icon">SelectFiles
+                      </button>&nbsp;
+                      <button class="btn" @click="toggleFolderMode" :class="isFolder ? 'btn-success btn-outline-warning' : 'btn-secondary' " style=" padding-left:3px; padding-right:3px;" title="选择要发送的目录&#10;Select folders to send. ">
+                        SelectFolders<img src="/assets/folder.svg"  width="24" height="24" alt="Icon">
                       </button>
-                      <button class="btn" @click="toggleFolderMode" :class="isFolder ? 'btn-success btn-outline-warning' : 'btn-secondary' " style="width:34px; padding-left:0px; padding-right:0px;" title="切换为发送目录/Toggle to send folders">
-                        <img src="/assets/folder.svg"  width="24" height="24" alt="Icon">
-                      </button>
+                      <!--
                       &nbsp;&nbsp;&nbsp;&nbsp;
                       <button class="btn btn-success" @click="selectFile" title="点击选择要发送的文件或目录。&#10;Click to select files or folders to send.">{{ isFolder ? 'SelectFolders' : 'SelectFiles' }}</button>
-                    </div>
+                      -->
+                      </div>
                   </div>
 
-                  <div class="col-6 mb-3 d-flex">
-                    <div class="form-check mb-0 mt-2"  title="发送前先压缩成zip&#10;Zip files before sendding." >
+                  <div class="col-6 mb-4  d-flex">
+                    <div class="form-check mb-1 mt-2" v-show="isFolder"  title="发送前先压缩成zip&#10;Zip files before sendding." >
                       <label class="form-check-label text-white " for="zip" >Zip</label>
-                      <input type="checkbox" id="zip"  v-model="config.zip"  class=" form-check-input"   title="" placeholder="">
+                      <input type="checkbox" id="zip"  v-model="zip"  class=" form-check-input"   title="" placeholder="">
                     </div>
-                    <div class="input-group mb-0 mt-0" title="发送目录时，排除文件名的特征清单，特征间以英文逗号分隔。&#10;如：'纪要,pdf' 表示文件名包含‘纪要’的或扩展名为pdf的，都不会发送。&#10;&#10;Exclude patterns when sending a directory. Separate multiple patterns with commas.&#10;Example: 'summary,pdf' means files whose names contain “summary” or have the “.pdf” extension will be excluded from sending." >
+                      &nbsp;&nbsp;&nbsp;&nbsp;
+                    <div class="input-group mb-1 mt-0 " v-show="isFolder && !zip" style="width:60%;" title="发送目录时，排除文件名的特征清单，特征间以英文逗号分隔。&#10;如：'pdf, 纪要' 表示文件名包含‘纪要’的或扩展名为pdf的，都不会发送。&#10;&#10;Exclude patterns when sending a folder. Separate multiple patterns with commas.&#10;Example: 'pdf, summary' means files whose names contain “summary” or have the “.pdf” extension will be excluded from sending." >
                       <span class="input-group-text text-white bg-secondary  " >Exclude</span>
-                      <input type="text" v-model="config.exclude"  class="form-control"    placeholder="eg.  'docx , summary' ">
+                      <input type="text" v-model="exclude"  class="form-control"    placeholder="eg.  'docx , summary' ">
                     </div>
                   </div>
                   <div class="col-2 mb-0 justify-content-end" style="display:flex; ">
@@ -1255,16 +1282,22 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
             <div class="fixed-pane-container">
               <div class="header-area pb-0">
                 <div class="row">
-                  <div class="col-9 mb-3">
+                  <div class="col-10 mb-3 ">
+                    <div class="d-flex">
                     <div class="input-group mb-0 mt-0" >
                       <span class="input-group-text text-white bg-secondary" id="">保存到/SaveTo</span>
                       <input type="text" class="form-control" v-model="savePath" @input="onSavePathInput($event.currentTarget as HTMLElement)" title="接收文件的保存位置/Where to save the files." >
                       <button class="btn btn-success" style="width:34px; padding-left:0px; padding-right:0px;" @click="selectSaveFolder" title="点击选择保存目录。&#10;Click to select save folder.">
                         <img src="/assets/folder.svg"  width="24" height="24" alt="Icon">
                       </button>
+                    </div> &nbsp;&nbsp;
+                    <div class="form-check mb-1 mt-2" style="width:280px;" title="目录中有同名文件时自动覆盖或断点续传&#10;Auto resume or overwrite when there are same files in the dir." >
+                      <label class="form-check-label text-white " for="overwrite" >Auto Resume/Overwrite</label>
+                      <input type="checkbox" id="overwrite"  v-model="config.overwrite"  class=" form-check-input"   title="" placeholder="">
                     </div>
                   </div>
-                  <div class="col-3 mb-2">
+                  </div>
+                  <div class="col-2 mb-2">
                     <span style="float:right;" title="输入对方Code后，点击接收文件。&#10;After entering the Code from other side,click to receive files.">
                       <button class="btn btn-warning" @click="receiveFiles">接收/Receive</button>
                     </span>
@@ -1372,7 +1405,7 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
               <label class="form-check-label text-white " for="local" >Force Local Connections</label>
               <input type="checkbox" id="local"  v-model="config.local"  class=" form-check-input"   title="" placeholder="">
             </div>
-            <div class="form-check mb-1 mt-0" title="目录中有同名文件时自动覆盖或自动断点续传&#10;Auto resume or overwrite when there are same files in the dir." >
+            <div class="form-check mb-1 mt-0" title="目录中有同名文件时自动覆盖或断点续传&#10;Auto resume or overwrite when there are same files in the dir." >
               <label class="form-check-label text-white " for="overwrite" >Auto Resume/Overwrite</label>
               <input type="checkbox" id="overwrite"  v-model="config.overwrite"  class=" form-check-input"   title="" placeholder="">
             </div>
@@ -1392,22 +1425,10 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
           <fieldset class="border p-2 rounded mb-1 pb-1 pt-1">
             <legend class="float-none w-auto px-0 mb-0 text-white fs-6">Send Options</legend>
             <div class="row">
-              <div class="col-12 d-flex">
-                <div class="form-check mb-1 mt-0"  title="发送前先压缩成zip&#10;Zip files before sendding." >
-                  <label class="form-check-label text-white " for="zip" >Zip Folder before sending</label>
-                  <input type="checkbox" id="zip"  v-model="config.zip"  class=" form-check-input"   title="" placeholder="">
-                </div>
-              </div>
               <div class="col-4 " >
                 <div class="input-group mb-0 mt-0 p-0 " title="并行传输的端口数，并非越大越好，建议4-16,默认4。&#10;Number of ports to use for transfers, default 4." >
                   <span class="input-group-text text-white bg-secondary mb-0 mt-0 p-1" >Tansfers </span>
                   <input type="number" v-model="config.transfers"  class="form-control mb-0 mt-0 p-1"   title="" placeholder="">
-                </div>
-              </div>
-              <div class="col-8">
-                <div class="input-group mb-1 mt-0" title="发送目录时，排除文件名的特征清单，特征间以英文逗号分隔。&#10;如：'纪要,pdf' 表示文件名包含‘纪要’的或扩展名为pdf的，都不会发送。&#10;&#10;Exclude patterns when sending a directory. Separate multiple patterns with commas.&#10;Example: 'summary,pdf' means files whose names contain “summary” or have the “.pdf” extension will be excluded from sending." >
-                  <span class="input-group-text text-white bg-secondary  mb-0 mt-0 p-1" >Exclude</span>
-                  <input type="text" v-model="config.exclude"  class="form-control mb-0 mt-0 p-1"    placeholder="eg.  'docx , summary' ">
                 </div>
               </div>
             </div>

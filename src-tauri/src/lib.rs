@@ -35,6 +35,8 @@ async fn send_files(
     mut files: Vec<FileItem>, // 需要发送的文件列表或目录
     code: String,             // 传输代码Code
     is_folder: bool,          // 是否为目录
+    zip: bool,                // if zip folder before sendding
+    exclude: String,          // exclude patterns when send folders
 ) -> Result<(), String> {
     let cfg = state.0.read().unwrap().clone();
 
@@ -49,11 +51,11 @@ async fn send_files(
         croc_args.push("--transfers".to_string());
         croc_args.push(transfers.to_string());
     }
-    if !cfg.exclude.trim().is_empty() {
+    if !exclude.trim().is_empty() {
         croc_args.push("--exclude".to_string());
-        croc_args.push(cfg.exclude.clone());
+        croc_args.push(exclude.clone());
     }
-    if cfg.zip {
+    if zip {
         croc_args.push("--zip".to_string());
     }
     if !code.trim().is_empty() && OS == "windows" {
@@ -78,14 +80,13 @@ async fn send_files(
     }
 
     // 处理目录，插入目录下的文件
-    if is_folder {
+    if is_folder && !zip {
         files = insert_files_after_dir(files);
     }
     // 启动 croc 进程
     println!("Send files croc with args: {croc_args:?}");
 
     let code2 = code.clone();
-    let cfg1 = cfg.clone();
     tokio::task::spawn_blocking(move || {
         #[cfg(not(windows))]
         let mut child: Child = if !code2.trim().is_empty() {
@@ -157,11 +158,16 @@ async fn send_files(
                                 .emit("croc-send-file-status", Some(EmitInfo{croc_code:code_str.clone(),info: status.to_string()}))
                                 .unwrap();
                         }
-                        if cfg.zip && is_folder{
-                        if let Some(zip)=get_zip_filename(&output){
-                            files=vec![];
-                            files.push(FileItem { file: zip.to_string(), status: "Pending".to_string(), is_dir: false });
-                        }
+                        if zip && is_folder{
+                            if let Some(zip_file)=get_zip_filename(&output){
+                                // insert zip filename to top
+                                //files.insert(0,FileItem { file: zip.to_string(), status: "Pending".to_string(), is_dir: false });
+                                let fname="Zip file  =>   ".to_string()+zip_file.as_str();
+                                files.push(FileItem { file: fname, status: "Pending".to_string(), is_dir: false });
+                                window
+                                    .emit("croc-send-file-progress", Some(EmitProgress{croc_code:code_str.clone().to_string(),files: files.clone()}))
+                                    .unwrap();
+                            }
                         }
                         if let Some(progress_data) = get_progress_data(&output,"Sending") {
                             // println!("Extracted progress data: {:?}", progress_data);

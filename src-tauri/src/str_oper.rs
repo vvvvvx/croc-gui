@@ -41,8 +41,8 @@ static RE_STATUS: Lazy<Regex> = Lazy::new(|| {
         .expect("Invalid regex for Status")
 });
 static RE_ZIP_FILENAME: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"Sending\s'([^\s%]+\.zip)'\sand\s\d+\sfolders")
-        .expect("Invalid regex for zip filename")
+    //Regex::new(r"Sending\s'([^\s%]+\.zip)'\sand\s\d+\sfolders")
+    Regex::new(r"Sending\s'([^\s%]+\.zip)'").expect("Invalid regex for zip filename")
 });
 
 static RE_PERCENT: Lazy<Regex> =

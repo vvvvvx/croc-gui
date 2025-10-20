@@ -11,8 +11,8 @@ export const reNum           = /^[1-9][0-9]?$/;
 
 export interface AppConfig  {
   transfers: number,   // 多少个port同时传输
-  zip: boolean,        // 发送前是否先打包压缩
-  exclude: string,     // 排除哪些文件，以逗号分隔
+  //zip: boolean,        // 发送前是否先打包压缩
+  //exclude: string,     // 排除哪些文件，以逗号分隔
   overwrite: boolean,  // 是否自动覆盖或续传
   multicast: string,   // 局域网广播范围 默认：239.255.255.250
   ip: string,          // 本机IP,如果有
