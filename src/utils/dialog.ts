@@ -1,6 +1,6 @@
 // src/utils/dialog.ts
 import { h, render, ref } from "vue";
-import { ElDialog, ElInput, ElButton } from "element-plus";
+import { ElDialog, ElInput, ElButton,ElCheckbox } from "element-plus";
 import "element-plus/dist/index.css";
 
 export async function askUserInput(title = "请输入内容"): Promise<string> {
@@ -130,6 +130,172 @@ export async function darkAlert(message: string, title = "提示"): Promise<void
                     onClick: handleClose,
                   },
                   () => "确定"
+                ),
+              ]
+            ),
+        }
+      ),
+      container
+    );
+  });
+}
+
+
+export async function darkConfirm(message: string, title = "确认"): Promise<boolean> {
+  return new Promise((resolve) => {
+    // 创建挂载容器
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const handleConfirm = () => {
+      cleanup();
+      resolve(true);
+    };
+
+    const handleCancel = () => {
+      cleanup();
+      resolve(false);
+    };
+
+    const cleanup = () => {
+      render(null, container);
+      container.remove();
+    };
+
+    // 渲染对话框
+    render(
+      h(
+        ElDialog,
+        {
+          modelValue: true,
+          closeOnClickModal: false,
+          closeOnPressEscape: false,
+          showClose: true,
+          customClass: "dark-dialog",
+          style: `
+            width: 500px;
+            text-align: center;
+            z-index: 1003;
+            background-color: #333;
+            color: #fff;
+          `,
+        },
+        {
+          // 标题 slot
+          title: () => h("div", { style: "color:white;" }, title),
+
+          // 内容 slot
+          default: () =>
+            h(
+              "div",
+              { style: "color:white; margin-top:10px; white-space: pre-wrap;" },
+              message
+            ),
+
+          // 底部按钮 slot
+          footer: () =>
+            h(
+              "div",
+              { style: "text-align:center;" },
+              [
+                h(
+                  ElButton,
+                  {
+                    type: "success",
+                    onClick: handleConfirm,
+                  },
+                  () => "是"
+                ),
+                h(
+                  ElButton,
+                  {
+                    type: "danger",
+                    onClick: handleCancel,
+                  },
+                  () => "否"
+                ),
+              ]
+            ),
+        }
+      ),
+      container
+    );
+  });
+}
+
+export async function darkConfirmRemember(
+  message: string,
+  title = "确认"
+): Promise<{ answer: boolean; remember: boolean }> {
+  return new Promise((resolve) => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const rememberChoice = ref(false);
+
+    const cleanup = () => {
+      render(null, container);
+      container.remove();
+    };
+
+    const handleConfirm = () => {
+      cleanup();
+      resolve({ answer: true, remember: rememberChoice.value });
+    };
+
+    const handleCancel = () => {
+      cleanup();
+      resolve({ answer: false, remember: rememberChoice.value });
+    };
+
+    render(
+      h(
+        ElDialog,
+        {
+          modelValue: true,
+          closeOnClickModal: false,
+          closeOnPressEscape: false,
+          showClose: true,
+          customClass: "dark-dialog",
+          style: `
+            width: 500px;
+            text-align: center;
+            z-index: 1003;
+            background-color: #333;
+            color: #fff;
+          `,
+        },
+        {
+          title: () => h("div", { style: "color:white;" }, title),
+
+          default: () =>
+            h("div", { style: "color:white; margin-top:10px; white-space: pre-wrap;" }, [
+              h("div", { style: "margin-bottom: 10px;" }, message),
+              h(
+                ElCheckbox,
+                {
+                  modelValue: rememberChoice.value,
+                  "onUpdate:modelValue": (val: any) => (rememberChoice.value = !!val),
+                  style: "margin-top: 10px; color:white;",
+                },
+                () => "记住我的选择"
+              ),
+            ]),
+
+          footer: () =>
+            h(
+              "div",
+              { style: "text-align:center;" },
+              [
+                h(
+                  ElButton,
+                  { type: "success", onClick: handleConfirm },
+                  () => "是"
+                ),
+                h(
+                  ElButton,
+                  { type: "danger", onClick: handleCancel },
+                  () => "否"
                 ),
               ]
             ),

@@ -6,7 +6,7 @@ import { downloadDir } from "@tauri-apps/api/path";
 import { listen,UnlistenFn } from "@tauri-apps/api/event";
 import { getVersion } from '@tauri-apps/api/app';
 //import { ElMessageBox } from "element-plus";
-import { darkAlert } from "./utils/dialog";
+import { darkAlert,darkConfirmRemember } from "./utils/dialog";
 import * as sets from "./utils/setting";
 //import { loadConfig,saveConfig } from "./utils/configManager";
 //import { AppConfig } from "./config";
@@ -83,6 +83,7 @@ const latestVersionDesc=ref(''); //最新版本描述
 const versionText=computed(()=>{return ((curVersion.value.toLowerCase() < latestVersion.value.toLowerCase()) && latestVersion.value!='') ?  `<a href="https://gitee.com/vvvvvx/croc-gui/releases" target="_blank" style="text-decoration:none;color:green;">有新版本/New version available.</a>`:`<a href="https://gitee.com/vvvvvx/croc-gui/releases" target="_blank" style="text-decoration:none;color:white;">Version: ${curVersion.value}</a>` ;}); //版本号显示文本
 const versionTitle=computed(()=>{return ((curVersion.value.toLowerCase() < latestVersion.value.toLowerCase()) && latestVersion.value!='') ? `当前版本：${curVersion.value}  最新版本：${latestVersion.value} \n\n新版本更新：\n${latestVersionDesc.value}`:"点击我查看版本更新信息。"}); //版本号鼠标悬停提示
 
+let rememberChoice : boolean | null = null; //ConfirmBox choice remember
 
 const isFolder = ref(false); // File or Folder mode
 const hasWarned = ref(false);// custom Code warning,just once
@@ -227,6 +228,7 @@ let listenSendTextStatus: UnlistenFn | null = null;
 let listenSendTextCode: UnlistenFn | null = null;
 let listenReceiveTextMsg :UnlistenFn | null = null;
 let listenReceiveTextStatus :UnlistenFn | null = null;
+let listenConfirm :UnlistenFn | null = null;
 
 async function selectFile() {
   //sendPathsTmp.value=[];
@@ -698,6 +700,7 @@ async function receiveFiles() {
     darkAlert("请选择保存目录。\nPlease select a save folder.\n\n");
     return;
   }
+  rememberChoice=null;
   // Implement file receiving logic here
   await invoke("receive_files", { savePath: savePath.value, code: crocCode.value });
 
@@ -1057,6 +1060,30 @@ onMounted(async () => {
     console.log(msg);
   });
 
+  // stdin input
+  listenConfirm = await listen("croc_confirm",async (event)=>{
+    const msg = event.payload as emitInfo;
+
+    if(rememberChoice!==null){
+      await invoke("write_stdin",{
+        code:msg.croc_code,
+        input:rememberChoice ? "y" : 'n'});
+      return;
+    }
+
+    const { answer,remember } =await  darkConfirmRemember("Code: "+msg.croc_code+"\n\n"+msg.info+"\n\n") ;
+    if(remember){
+      rememberChoice=answer;
+    }
+    console.log("answer:",answer,"remember:",remember);
+    await invoke("write_stdin",{
+      code:msg.croc_code,
+      input:answer ? "y" : 'n'});
+
+    console.log("Confirm info:",msg);
+  });
+
+
   interface versionInfo {
     tag_name:string,
     body:string
@@ -1116,6 +1143,7 @@ onBeforeUnmount(() => {
   listenSendTextCode?.();
   listenReceiveTextMsg?.();
   listenReceiveTextStatus?.();
+  listenConfirm?.();
   document.removeEventListener("click", clickOutsideHandler);
 });
 
@@ -1230,7 +1258,7 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
                   </div>
 
                   <div class="col-6 mb-4  d-flex">
-                    <div class="form-check mb-1 mt-2" v-show="isFolder"  title="发送前先压缩成zip&#10;Zip files before sendding." >
+                    <div class="form-check mb-1 mt-2" v-show="isFolder"  title="发送前先压缩成zip,选择Zip则Exclude无效&#10;Zip files before sendding.If select zip,then Exclude invalid." >
                       <label class="form-check-label text-white " for="zip" >Zip</label>
                       <input type="checkbox" id="zip"  v-model="zip"  class=" form-check-input"   title="" placeholder="">
                     </div>
@@ -1290,11 +1318,14 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
                       <button class="btn btn-success" style="width:34px; padding-left:0px; padding-right:0px;" @click="selectSaveFolder" title="点击选择保存目录。&#10;Click to select save folder.">
                         <img src="/assets/folder.svg"  width="24" height="24" alt="Icon">
                       </button>
-                    </div> &nbsp;&nbsp;
+                    </div>
+                <!--
+                    &nbsp;&nbsp;
                     <div class="form-check mb-1 mt-2" style="width:280px;" title="目录中有同名文件时自动覆盖或断点续传&#10;Auto resume or overwrite when there are same files in the dir." >
                       <label class="form-check-label text-white " for="overwrite" >Auto Resume/Overwrite</label>
                       <input type="checkbox" id="overwrite"  v-model="config.overwrite"  class=" form-check-input"   title="" placeholder="">
                     </div>
+                -->
                   </div>
                   </div>
                   <div class="col-2 mb-2">

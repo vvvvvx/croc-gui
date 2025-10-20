@@ -33,6 +33,7 @@ pub struct ProgressData {
     pub time: String,          //已耗时：预估耗时
 }
 
+// 用于聊天监听消息回复时的，进程全局控制
 #[derive(Default)]
 pub struct CrocWorker {
     pub tasks: HashMap<String, Arc<AtomicBool>>, // code -> running flag

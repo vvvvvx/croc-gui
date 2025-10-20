@@ -6,10 +6,12 @@ pub mod types;
 pub mod utils;
 pub mod version;
 
+use std::collections::HashMap;
 use std::env::consts::OS;
-use std::io::{self, Read};
+use std::io::{self, Read };
 use std::process::Stdio;
 use std::process::{Child, Command};
+use tokio::process::{Child as tChild, Command as tCommand};
 //use tauri::plugin;
 use crate::types::{CrocWorker, EmitInfo, EmitProgress, FileItem};
 use crate::utils::*;
@@ -17,16 +19,26 @@ use crate::version::check_update;
 use chat_listener::{start_chat_listener, stop_chat_listener};
 use setting::{load_config, save_config, ConfigState};
 //use std::fs::{self};
+use once_cell::sync::Lazy;
 use std::sync::Arc;
 use str_oper::*;
 use tauri::Emitter;
 use tauri::State;
+use tokio::io::{ AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex;
 //use std::path::Path;
 //use tauri_plugin_shell;
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
+
+// 用于处理croc进程运行中的实时交互。回答Y/N
+pub static GLOBAL_STDINS: Lazy<
+    Arc<Mutex<HashMap<String, Arc<Mutex<tokio::process::ChildStdin>>>>>,
+> = Lazy::new(|| Arc::new(Mutex::new(HashMap::new())));
+
+// static CONFIRM_STATE: Lazy<Mutex<HashMap<String, Option<String>>>> =
+//     Lazy::new(|| Mutex::new(HashMap::new()));
 
 #[tauri::command]
 async fn send_files(
@@ -235,6 +247,22 @@ async fn send_files(
 }
 
 #[tauri::command]
+async fn write_stdin(code: String, input: String) -> Result<(), String> {
+    // let mut state = CONFIRM_STATE.lock().await;
+    // state.insert(code, Some(input));
+    let map = GLOBAL_STDINS.lock().await;
+
+    if let Some(stdin_arc) = map.get(&code) {
+        let mut stdin = stdin_arc.lock().await;
+        stdin
+            .write_all(format!("{input}\n").as_bytes())
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 async fn receive_files(
     window: tauri::Window,
     state: State<'_, ConfigState>,
@@ -288,37 +316,46 @@ async fn receive_files(
     let code2 = code.clone();
     let code_str = code2.clone();
     let mut files: Vec<FileItem> = vec![];
-    tokio::task::spawn_blocking(move || {
+    //tokio::task::spawn_blocking(move || {
+    tokio::spawn(async move {
 
         #[cfg(not(windows))]
-        let mut child: Child = Command::new("croc")
+        let mut child: tChild = tCommand::new("croc")
                 .args(croc_args)
                 .env("CROC_SECRET", code2) // 设置环境变量
+                .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()
                 .expect("Failed to start croc command");
 
         #[cfg(windows)]
-        let mut child = Command::new("croc")
+        let mut child:tChild = tCommand::new("croc")
             .args(croc_args)
             // windows下需要设置不显示命令行窗口
             .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .expect("Failed to start croc command");
 
+        // 保存stdin,用于初一异常交互Y/N
+        let stdin=child.stdin.take().unwrap();
+        let state=GLOBAL_STDINS.lock().await.insert(code_str.clone(),Arc::new(Mutex::new(stdin)));
+        //let mut state=GLOBAL_STDINS.lock().await.insert(code_str.clone(),Arc::new(Mutex::new(None)));
+        drop(state);
         // 处理 croc 输出
-
         let mut full_out="".to_string(); //for stdout
         let mut full_err="".to_string(); //for stderr
 
+
         if let Some(stderr) = child.stderr.take() {
-            let mut reader = io::BufReader::new(stderr);
+            // let mut reader = io::BufReader::new(stderr);
+            let mut reader = BufReader::new(stderr);
             let mut buffer = [0u8; 4096];
             loop {
-                match reader.read(&mut buffer) {
+                match reader.read(&mut buffer).await {
                     Ok(0) => break, // EOF
                     Ok(n) => {
                         let output = String::from_utf8_lossy(&buffer[..n]).to_string();
@@ -371,7 +408,29 @@ async fn receive_files(
                                 .unwrap();
                             // return "Repeated sending.".to_string();
                         }
+                        if let Some(confirm)=get_confirm(&output) {
+                            // let mut state = CONFIRM_STATE.lock().await;
+                            // state.insert(code_str.clone(), None);
+                            // drop(state);
 
+                            window.emit("croc_confirm", EmitInfo{croc_code:code_str.clone(),info:confirm}) .unwrap();
+                            // loop {
+                            //     let mut state= CONFIRM_STATE.lock().await;
+                            //     if let Some(Some(input))=state.get(&code_str){
+                            //         println!("User answer:{}",input);
+                            //         let stdin_arc=GLOBAL_STDINS.lock().await.get(&code_str).unwrap().clone();
+                            //         let mut stdin = stdin_arc.lock().await;
+                            //         stdin.write_all(format!("{}\n",input).as_bytes()).await.unwrap();
+                            //         stdin.flush().await.unwrap();
+                            //
+                            //         state.remove(&code_str);
+                            //         break;
+                            //     }
+                            //     drop(state);
+                            //     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+                            // }
+                        }
                         full_err+=output.as_str();
                     }
                     Err(err) => {
@@ -382,10 +441,10 @@ async fn receive_files(
             }
         }
         if let Some(stdout) = child.stdout.take() {
-            let mut reader = io::BufReader::new(stdout);
+            let mut reader = BufReader::new(stdout);
             let mut buffer = [0u8; 4096];
             loop {
-                match reader.read(&mut buffer) {
+                match reader.read(&mut buffer).await {
                     Ok(0) => break, // EOF
                     Ok(n) => {
                         let output = String::from_utf8_lossy(&buffer[..n]).to_string();
@@ -415,7 +474,7 @@ async fn receive_files(
         // stdout.read_to_end(&mut stdout_buf).unwrap();
         // let full_out = String::from_utf8_lossy(&stdout_buf).to_string();
 
-        let status = child.wait().expect("Command wasn't running");
+        let status = child.wait().await.expect("Command wasn't running");
 
         if status.success() {
             // 如果full_out是空，其实是接收的文件。
@@ -435,8 +494,10 @@ async fn receive_files(
                     .unwrap();
 
             }
+            GLOBAL_STDINS.lock().await.remove(&code_str);
         } else {
             emit_exit_info(window.clone(), "receive", code_str.clone(), status.code().unwrap()); 
+            GLOBAL_STDINS.lock().await.remove(&code_str);
             // window
             //     .emit(
             //         "croc-receive-error",
@@ -473,6 +534,7 @@ async fn send_text(
             .unwrap();
         return Ok(());
     }
+    // 读取内存配置
     let cfg = state.0.read().unwrap().clone();
 
     // 构建 croc 命令参数
@@ -825,6 +887,7 @@ pub fn run() {
     //读取程序配置信息
     let _cfg = load_config_internal();
     let app = tauri::Builder::default()
+        // chat_listener监听进程管理
         .manage(Arc::new(Mutex::new(CrocWorker::default())))
         //加入全局配置信息
         .manage(ConfigState(std::sync::RwLock::new(_cfg)))
@@ -840,7 +903,8 @@ pub fn run() {
             start_chat_listener,
             stop_chat_listener,
             load_config,
-            save_config
+            save_config,
+            write_stdin
         ])
         // .run(tauri::generate_context!())
         .build(tauri::generate_context!())

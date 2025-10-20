@@ -47,7 +47,15 @@ static RE_ZIP_FILENAME: Lazy<Regex> = Lazy::new(|| {
 
 static RE_PERCENT: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\d+%").expect("Invalid regex for Percent"));
+static RE_CONFIRM: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"[a-zA-Z ]*[^\s%]+\?\s*(\([yY]/[nN]\)[ ]*)").expect("Invalid regex for Confirm Str")
+});
 
+pub fn get_confirm(text: &str) -> Option<String> {
+    RE_CONFIRM
+        .captures(text)
+        .and_then(|caps| caps.get(0).map(|m| m.as_str().to_string()))
+}
 pub fn get_code(text: &str) -> Option<String> {
     RE_CODE
         .captures(text)
