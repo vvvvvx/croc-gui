@@ -48,7 +48,10 @@ Croc-gui is just a GUI,the base is Croc. Croc-gui has all advantages of Croc,and
 
 
 
+<font color="red">**Notice:**</font>  
 
+Certain antivirus programs (e.g., 360 Antivirus) may trigger a false positive alert, as croc-gui invokes the external tool croc.
+This detection is a false alarm, and the application is safe and clean.
 
 ## Compile
 
