@@ -8,7 +8,7 @@ pub mod version;
 
 use std::collections::HashMap;
 use std::env::consts::OS;
-use std::io::{self, Read };
+use std::io::{self, Read};
 use std::process::Stdio;
 use std::process::{Child, Command};
 use tokio::process::{Child as tChild, Command as tCommand};
@@ -24,7 +24,7 @@ use std::sync::Arc;
 use str_oper::*;
 use tauri::Emitter;
 use tauri::State;
-use tokio::io::{ AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex;
 //use std::path::Path;
 //use tauri_plugin_shell;
@@ -174,7 +174,8 @@ async fn send_files(
                             if let Some(zip_file)=get_zip_filename(&output){
                                 // insert zip filename to top
                                 //files.insert(0,FileItem { file: zip.to_string(), status: "Pending".to_string(), is_dir: false });
-                                let fname="Zip file  =>   ".to_string()+zip_file.as_str();
+                                let fname=zip_file.to_string();
+                                //let fname="Zip file  =>   ".to_string()+zip_file.as_str();
                                 files.push(FileItem { file: fname, status: "Pending".to_string(), is_dir: false });
                                 window
                                     .emit("croc-send-file-progress", Some(EmitProgress{croc_code:code_str.clone().to_string(),files: files.clone()}))
@@ -409,27 +410,7 @@ async fn receive_files(
                             // return "Repeated sending.".to_string();
                         }
                         if let Some(confirm)=get_confirm(&output) {
-                            // let mut state = CONFIRM_STATE.lock().await;
-                            // state.insert(code_str.clone(), None);
-                            // drop(state);
-
                             window.emit("croc_confirm", EmitInfo{croc_code:code_str.clone(),info:confirm}) .unwrap();
-                            // loop {
-                            //     let mut state= CONFIRM_STATE.lock().await;
-                            //     if let Some(Some(input))=state.get(&code_str){
-                            //         println!("User answer:{}",input);
-                            //         let stdin_arc=GLOBAL_STDINS.lock().await.get(&code_str).unwrap().clone();
-                            //         let mut stdin = stdin_arc.lock().await;
-                            //         stdin.write_all(format!("{}\n",input).as_bytes()).await.unwrap();
-                            //         stdin.flush().await.unwrap();
-                            //
-                            //         state.remove(&code_str);
-                            //         break;
-                            //     }
-                            //     drop(state);
-                            //     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-                            // }
                         }
                         full_err+=output.as_str();
                     }
@@ -705,34 +686,42 @@ async fn receive_text(
     println!("Running croc with args: {croc_args:?}");
     let code2 = code.clone();
     let mut files: Vec<FileItem> = vec![];
-    tokio::task::spawn_blocking(move || {
+    //tokio::task::spawn_blocking(move || {
+    tokio::spawn(async move {
         #[cfg(not(windows))]
-        let mut child: Child = Command::new("croc")
+        let mut child: tChild = tCommand::new("croc")
                 .args(croc_args)
                 .env("CROC_SECRET", code2.clone()) // 设置环境变量
+                .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()
                 .expect("Failed to start croc command");
 
         #[cfg(windows)]
-        let mut child = Command::new("croc")
+        let mut child: tChild = tCommand::new("croc")
             .args(croc_args)
             // windows下需要设置不显示命令行窗口
             .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .expect("Failed to start croc command");
 
         let code_str = code2.trim().to_string();
+
+        // 保存stdin,用于初一异常交互Y/N
+        let stdin=child.stdin.take().unwrap();
+        let state=GLOBAL_STDINS.lock().await.insert(code_str.clone(),Arc::new(Mutex::new(stdin)));
+
         // 处理 croc 输出
         let mut full_output="".to_string();
         if let Some(stderr) = child.stderr.take() {
-            let mut reader = io::BufReader::new(stderr);
+            let mut reader = BufReader::new(stderr);
             let mut buffer = [0u8; 4096];
             loop {
-                match reader.read(&mut buffer) {
+                match reader.read(&mut buffer).await {
                     Ok(0) => break, // EOF
                     Ok(n) => {
                         let output = String::from_utf8_lossy(&buffer[..n]).to_string();
@@ -788,6 +777,9 @@ async fn receive_text(
                                 .unwrap();
 
                         }
+                        if let Some(confirm)=get_confirm(&output) {
+                            window.emit("croc_confirm", EmitInfo{croc_code:code_str.clone(),info:confirm}) .unwrap();
+                        }
                         full_output+=output.as_str();
                     }
                     Err(err) => {
@@ -800,11 +792,11 @@ async fn receive_text(
 
         let mut stdout = child.stdout.take().unwrap();
         let mut stdout_buf = Vec::new();
-        stdout.read_to_end(&mut stdout_buf).unwrap();
+        stdout.read_to_end(&mut stdout_buf).await.unwrap();
         // croc send --text 时，正文在stdout
         let full_out= String::from_utf8_lossy(&stdout_buf).to_string();
 
-        let status = child.wait().expect("Command wasn't running");
+        let status = child.wait().await.expect("Command wasn't running");
 
         if status.success() {
             //如果full_out是空，实际是接收的file,而非text
@@ -824,11 +816,13 @@ async fn receive_text(
                     .unwrap();
 
             }
+            GLOBAL_STDINS.lock().await.remove(&code_str);
             // window
             //     .emit("croc-receive-text-success", Some(EmitInfo{croc_code:code_str.clone(),info: "receive success".to_string()}))
             //     .unwrap();
         } else {
             emit_exit_info(window.clone(), "receive", code_str.clone(), status.code().unwrap()); 
+            GLOBAL_STDINS.lock().await.remove(&code_str);
             // window
             //     .emit(
             //         "croc-receive-error",

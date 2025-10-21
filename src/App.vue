@@ -732,6 +732,7 @@ async function receiveText() {
     darkAlert("请输入Code。\nEnter Code first.\n\n");
     return;
   }
+  rememberChoice=null;
   // savePath 用于处理误在聊天界面接收文件
   await invoke("receive_text", {  code: crocCode.value,savePath:savePath.value });
 }

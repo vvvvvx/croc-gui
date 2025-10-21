@@ -225,7 +225,7 @@ export async function darkConfirm(message: string, title = "确认"): Promise<bo
 
 export async function darkConfirmRemember(
   message: string,
-  title = "确认"
+  title = "确认/Confirm"
 ): Promise<{ answer: boolean; remember: boolean }> {
   return new Promise((resolve) => {
     const container = document.createElement("div");
@@ -278,7 +278,7 @@ export async function darkConfirmRemember(
                   "onUpdate:modelValue": (val: any) => (rememberChoice.value = !!val),
                   style: "margin-top: 10px; color:white;",
                 },
-                () => "记住我的选择"
+                () => "记住我的选择/Remember my choice"
               ),
             ]),
 
@@ -290,12 +290,12 @@ export async function darkConfirmRemember(
                 h(
                   ElButton,
                   { type: "success", onClick: handleConfirm },
-                  () => "是"
+                  () => "是/Yes"
                 ),
                 h(
                   ElButton,
                   { type: "danger", onClick: handleCancel },
-                  () => "否"
+                  () => "否/No"
                 ),
               ]
             ),

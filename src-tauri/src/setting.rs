@@ -4,6 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 use tauri::State;
+
 pub struct ConfigState(pub RwLock<AppConfig>);
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
