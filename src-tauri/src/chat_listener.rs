@@ -21,6 +21,7 @@ pub async fn start_chat_listener(
     window: tauri::Window,
     code: String,
 ) -> Result<(), String> {
+    // 控制监听运行和退出。true时在running,false时退出监听循环。
     let mut worker = state.lock().await;
 
     // 如果该 code 已在运行，则返回
@@ -91,11 +92,11 @@ pub async fn start_chat_listener(
                             }),
                         )
                         .unwrap();
-                    running.store(false, Ordering::SeqCst);
+                    //running.store(false, Ordering::SeqCst);
                 }
             }
             // 每 10 秒再检测一次
-            sleep(Duration::from_secs(10)).await;
+            sleep(Duration::from_secs(5)).await;
         }
 
         println!("Code:{code_clone}\nlistener stopped");

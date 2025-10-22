@@ -51,8 +51,9 @@ interface fileProcess{
 }
 // 文本发送类
 interface chatProcess{
-  croc_code:string,
+  croc_code:string, //main code
   type:string, //TextChat or FileSend or FileReceive
+  clientRole:string // Sender | Receiver
   memo:string, // mark the code to who
   isListening:boolean, // if true ,must wait the back msg first.
   isChatEstablished:boolean,
@@ -76,7 +77,10 @@ enum Type {
   TextChat="TextChat",
   FileTrans="FileTrans"
 }
-
+enum Role{
+  Sender = "Sender",
+  Receiver = "Receiver"
+}
 const curVersion=ref(''); //当前版本号
 const latestVersion=ref(''); //最新版本号
 const latestVersionDesc=ref(''); //最新版本描述
@@ -429,6 +433,13 @@ function onClickTextChat(){
 function isWaiting(code:string):boolean{
   return waitingCodesList.value.includes(code);
 }
+function isMainCode(code:string):boolean {
+  const [code1st,]=getCodeParts(code);
+  // s1111 Sender's Code,
+  // r2222 Receiver's Code
+  if(code1st ==="" || code1st==="s1111" || code1st==="r2222") return false;
+  return true;
+}
 function deleteCode(code:string){
   const index=waitingCodesList.value.indexOf(code);
   if (index!==-1) {
@@ -446,13 +457,26 @@ function getTime():string{
 
 // 生成完整消息记录
 
+// Code:1234-goods-boooks-funny
+// return [1234, goods-boooks-funny]
+function getCodeParts(code:string):[string,string]{
+  const parts= code.split("-");
+  if(parts.length!==4) return ["",""];
+  return [ parts[0],  parts[1]+"-"+parts[2]+"-"+parts[3] ];
+}
+
 function chatGetRecords(code:string):string {
 
+  console.log("chatGetRecords code:",code);
+  //alert("chatGetRecords code:"+code);
   if(!code || ! chatProcessList) return "";
 
-  const exist= chatProcessList.value.find( c => c.croc_code == code);
+  const exist= chatProcessList.value.find( c => c.croc_code.includes(code));
 
   const msgs =Array.isArray(exist?.msgList) ? exist!.msgList : [];
+  
+  console.log("chatGetRecords msgs:",msgs);
+  //alert("chatGetRecords msgs:"+msgs);
 
   //let text = "";
   if (!exist || !exist.msgList){
@@ -470,7 +494,7 @@ function chatGetRecords(code:string):string {
 // 添加消息
 function msgAdd(code:string,msg:string,fromOrTo:string){
   //查找会话
-  const exist= chatProcessList.value.find( c => c.croc_code == code);
+  const exist= chatProcessList.value.find( c => c.croc_code.includes(code));
   const newMsg: txtMsg ={
       croc_code:code,
       type: fromOrTo,// To or From
@@ -484,31 +508,53 @@ function msgAdd(code:string,msg:string,fromOrTo:string){
   }
 }
 // Get the listening status of this chatProcess
+/*
 function msgListeningStatusGet(code:string):boolean {
-  const exist= chatProcessList.value.find( c => c.croc_code == code);
+  const exist= chatProcessList.value.find( c => c.croc_code.includes(code));
   if(exist){
     return exist.isListening;
   }
   return false; 
 }
-
+*/
 // Set the listening status of this chatProcess
 function msgListeningStatusSet(code:string,status:boolean) {
-  const exist= chatProcessList.value.find( c => c.croc_code == code);
+  const exist= chatProcessList.value.find( c => c.croc_code.includes(code));
   if(exist){
     exist.isListening=status;
   }
 }
+// Code:1234-goods-boooks-funny
+// codePart: goods-boooks-funny
+function msgGetMainCode(codePart:string):string{
+  const parts=codePart.split("-");
+  let code="----";
+  if(parts.length===3) code=codePart;
+  if(parts.length===4) code=parts[1]+"-"+parts[2]+"-"+parts[3];
+  const exist= chatProcessList.value.find( c => c.croc_code.includes(code));
+
+  if(exist) return exist.croc_code;
+  return "";
+}
+function  msgGetRole(mainCode:string):string{
+  const [,code3Last]=getCodeParts(mainCode);
+  const exist= chatProcessList.value.find( c => c.croc_code.includes( code3Last));
+  if(exist){
+    return exist.clientRole;
+  }
+  return "";
+
+}
 function msgChatEstablishedStatusGet(code:string):boolean {
   if(code.trim().length===0) return false;
-  const exist= chatProcessList.value.find( c => c.croc_code == code);
+  const exist= chatProcessList.value.find( c => c.croc_code.includes( code));
   if(exist){
     return exist.isChatEstablished;
   }
   return false;
 }
 function msgChatEstablishedStatusSet(code:string,status:boolean) {
-  const exist= chatProcessList.value.find( c => c.croc_code == code);
+  const exist= chatProcessList.value.find( c => c.croc_code.includes(code));
   if(exist){
     exist.isChatEstablished=status;
   }
@@ -531,12 +577,12 @@ function newArrivalStatusSet(code:string,type:string,status:boolean) {
 }
 // 更新最后一条发送信息是否已收到。
 function msgUpdateLastMsgStatus(code:string){
-  const exist= chatProcessList.value.find( c => c.croc_code == code);
+  const exist= chatProcessList.value.find( c => c.croc_code.includes( code));
   if(!exist){
     darkAlert("错误：更新聊天记录状态时，找不到对应聊天会话\n\n");
     return;
   }
-  const msg=exist.msgList.findLast(c => c.croc_code==code && c.type=="To");
+  const msg=exist.msgList.findLast(c => c.croc_code.includes( code) && c.type=="To");
   if (!msg){
     darkAlert("错误：更新聊天记录状态时，找不到对应聊天消息\n\n");
     return;
@@ -544,24 +590,28 @@ function msgUpdateLastMsgStatus(code:string){
   msg.msg += " (Received)";
 }
 // 添加聊天任务到列表
-function msgAddProcess(code:string,memo:string){
-  const exist= chatProcessList.value.find( c => c.croc_code == code && c.type==Type.TextChat);
+function msgAddProcess(code:string,memo:string,role:string){
+  const exist= chatProcessList.value.find( c => c.croc_code.includes(code) && c.type==Type.TextChat);
   if(!exist){
     chatProcessList.value.push({
       croc_code:code,
       memo:memo,
       type:Type.TextChat,
+      clientRole:role,
       isListening:false,
       isChatEstablished:false,
       newArrival:false,
       last:false,
       msgList:[]
     })
+  } else if(exist.clientRole!==role){
+     darkAlert("本程序不能接收本程序消息\n\nThis program cannot receive messages from itself.\n\n") 
   }
+
 }
 
 function msgProcessIsInList(code:string):boolean{
-  const exist= chatProcessList.value.some( c => c.croc_code == code );
+  const exist= chatProcessList.value.some( c => c.croc_code.includes(code) );
   return exist;
 }
 // <-------message funciton 
@@ -717,15 +767,37 @@ async function sendText() {
     return;
   }
   // 如果已发送，对方还未回复，程序处于监听状态，不能重复发送。
-  if( crocCode.value.trim().length>0 && msgListeningStatusGet(crocCode.value) ){
-    darkAlert("对方回复后才能发送下一条。\n Can not send before the last msg be replied.");
-    return;
-  }
-  if(crocCode.value.trim()!=="" && !isWaiting(crocCode.value.trim())) {
-    waitingCodesList.value.push(crocCode.value);
-  }
+ // if( crocCode.value.trim().length>0 && msgListeningStatusGet(crocCode.value) ){
+ //   darkAlert("对方回复后才能发送下一条。\n Can not send before the last msg be replied.");
+ //   return;
+ // }
+  
+  const role = msgGetRole(crocCode.value.trim())
+  const [,code3Last] =getCodeParts(crocCode.value);
+  // s1111 for Sender sending
+  // r2222 for Receiver sending.
+  const code= role=== Role.Sender ? "s1111-"+code3Last : "r2222-"+code3Last;
 
-  await invoke("send_text", { msg:inputText.value, code: crocCode.value });
+  if(crocCode.value.trim()!=="" && !isWaiting(crocCode.value.trim())) {
+    //无role信息，则是第一次发起会话
+    if(role===""){
+      waitingCodesList.value.push(crocCode.value);
+    }else{
+    // 否则是回复已有会话
+      if(!isWaiting(code)) {
+        waitingCodesList.value.push(code);
+      } else {
+        darkAlert("对方收到消息后才可继续发送新消息\n\nWait until the previous message is received before sending a new one.\n\n")
+        return;
+      }
+    }
+
+  }
+  if(role===""){
+    await invoke("send_text", { msg:inputText.value, code: crocCode.value });
+  }else{
+    await invoke("send_text", { msg:inputText.value, code: code});
+  }
 }
 async function receiveText() {
   if(crocCode.value.trim()===""){
@@ -978,21 +1050,29 @@ onMounted(async () => {
 
   listenSendTextCode = await listen("croc-send-text-code", (event) => {
     const code = event.payload as string;
-    crocCode.value = code.trim();
+
+    //const [code1st,code3Last]=getCodeParts(code);
 
     // 如果此code没有在等待接收，则置为在等待接收状态。
     if(!isWaiting(code.trim())){
       waitingCodesList.value.push(code.trim());
     }
+    let mainCode="";
+    if (isMainCode(code)){
+      crocCode.value = code.trim();
+      mainCode=crocCode.value;
+    }else{
+      mainCode=msgGetMainCode(code)
+    }
     // 会话是否已在列表中
-    if (!msgProcessIsInList(code)){
+    if (isMainCode(code) && !msgProcessIsInList(mainCode)){
       const input_memo= "Chat-"+(textChatCount.value as number + 1); //await askUserInput("给新任务Code起个别名，以便区别查看多任务:");
-      msgAddProcess(code,input_memo);
+      msgAddProcess(code,input_memo,Role.Sender);
       memo.value=input_memo;
       //darkAlert(memo);
     }
     // record the msg
-    msgAdd(code,inputText.value,"To");
+    msgAdd(mainCode,inputText.value,"To");
 
     inputText.value="";
     //darkAlert("Code: "+code+"\n\n聊天已就绪，把Code发给对方开始聊天。\n【Code已复制，直接粘贴】\n\nChat ready, provide the Code to recipient to chat.\n【Code copied to clipboard】");
@@ -1002,8 +1082,10 @@ onMounted(async () => {
 
   listenSendTextSuccess = await listen("croc-send-text-success", (event) => {
     const message = event.payload as emitInfo;
+
+    const mainCode=msgGetMainCode(message.croc_code);
     // latest msg add "(Received)"
-    msgUpdateLastMsgStatus(message.croc_code);
+    msgUpdateLastMsgStatus(mainCode);
 
     if (isWaiting(message.croc_code)){
       deleteCode(message.croc_code);
@@ -1013,10 +1095,21 @@ onMounted(async () => {
 
     //inputText.value="";
     // set listening status to true
-    msgListeningStatusSet(message.croc_code,true);
-    msgChatEstablishedStatusSet(message.croc_code,true);
-    // if other side received the msg, continuely listen the coming msg.
-    invoke("start_chat_listener",{code: message.croc_code} );
+    msgListeningStatusSet(mainCode,true);
+    msgChatEstablishedStatusSet(mainCode,true);
+
+    if(isMainCode(message.croc_code)){
+      // if other side received the msg, continuely listen the coming msg.
+      // 
+      const [_,code3Last]=getCodeParts(mainCode);
+      const role = msgGetRole(mainCode);
+      // Sender listen Receiver's Code
+      // Receiver listen Sender's Code
+      // r2222 = Receiver's send code
+      // s1111 = Sender's send code
+      const code = role===Role.Sender ? "r2222-"+code3Last : "s1111-"+code3Last;
+      invoke("start_chat_listener",{code: code} );
+    }
     console.log("Croc receive success:", message);
   });
 
@@ -1032,25 +1125,36 @@ onMounted(async () => {
 
   listenReceiveTextMsg = await listen("croc-receive-text-msg",(event)=>{
     const msg = event.payload as emitInfo;
+
+    const mainCode=msgGetMainCode(msg.croc_code);
+    
     //darkAlert(message.info);
-      // 会话是否已在列表中
-      if (!msgProcessIsInList(msg.croc_code)){
-        const input_memo=  "Chat-"+(textChatCount.value as number + 1); //await askUserInput("给新任务Code起个别名，以便区别查看多任务:");
-        msgAddProcess(msg.croc_code,input_memo);
-        memo.value=input_memo;
-        // 如果是FileReceive界面接收的文本，则在fileProcessList中删除同Code项
-        if(transferType.value===Type.FileReceive){
-          const index=fileProcessList.value.findIndex(fp => fp.croc_code===msg.croc_code && fp.type===Type.FileReceive );
-          if(index!==-1) fileProcessList.value.splice(index,1);
-        }
-      } 
+    // 会话是否已在列表中
+    if (isMainCode(msg.croc_code) && !msgProcessIsInList(msg.croc_code)){
+      const input_memo=  "Chat-"+(textChatCount.value as number + 1); //await askUserInput("给新任务Code起个别名，以便区别查看多任务:");
+      msgAddProcess(msg.croc_code,input_memo,Role.Receiver);
+      memo.value=input_memo;
+      // 如果是FileReceive界面接收的文本，则在fileProcessList中删除同Code项
+      if(transferType.value===Type.FileReceive){
+        const index=fileProcessList.value.findIndex(fp => fp.croc_code===msg.croc_code && fp.type===Type.FileReceive );
+        if(index!==-1) fileProcessList.value.splice(index,1);
+      }
+      
+      // 开始持续监听发送方消息
+      // Sender listen Receiver's Code
+      // Receiver listen Sender's Code
+      // r2222 = Receiver's send code
+      // s1111 = Sender's send code
+      const [_,code3Last]=getCodeParts(msg.croc_code);
+      invoke("start_chat_listener",{code: "s1111-"+code3Last} );
+    } 
     // record the msg
-    msgAdd(msg.croc_code,msg.info,"From");
+    msgAdd(mainCode,msg.info,"From");
     // set isListenning status to false
-    msgListeningStatusSet(msg.croc_code,false);
+    msgListeningStatusSet(mainCode,false);
     // set hasNewMsg status to true
-    if(msg.croc_code!==crocCode.value || transferType.value!==Type.TextChat){
-      newArrivalStatusSet(msg.croc_code,Type.TextChat ,true);
+    if(mainCode!==crocCode.value || transferType.value!==Type.TextChat){
+      newArrivalStatusSet(mainCode,Type.TextChat ,true);
       console.log("newArrival:",true);
     }
     // 如果transferType不是‘TextChat’，则说明是user在FileReceive界面接收了Text.应该切换到TextChat界面
