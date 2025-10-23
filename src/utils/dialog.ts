@@ -78,7 +78,7 @@ export async function askUserInput(title = "请输入内容"): Promise<string> {
   });
 }
 
-export async function darkAlert(message: string, title = "提示"): Promise<void> {
+export async function darkAlert(message: string, title = "提  示"): Promise<void> {
   return new Promise((resolve) => {
     // 创建挂载容器
     const container = document.createElement("div");
@@ -112,7 +112,7 @@ export async function darkAlert(message: string, title = "提示"): Promise<void
         },
         {
           // 自定义标题 slot
-          title: () => h("div", { style: "color:white;" }, title),
+          title: () => h("div", { style: "color:white;font-weight:bold;font-size:22px;" }, title),
 
           // 默认内容 slot
           default: () => h("div", { style: "color:white; margin-top: 10px;white-space: pre-wrap;" }, message),

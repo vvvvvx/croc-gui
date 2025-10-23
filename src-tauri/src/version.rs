@@ -12,7 +12,7 @@ pub async fn check_update() -> Result<GiteeRelease, String> {
     match reqwest::Client::new().get(url).send().await {
         Ok(response) => {
             if let Ok(release) = response.json::<GiteeRelease>().await {
-                println!("Latest release: {release:?}");
+                //println!("Latest release: {release:?}");
                 Ok(release)
             } else {
                 Err("Failed to parse release info from Gitee".to_string())

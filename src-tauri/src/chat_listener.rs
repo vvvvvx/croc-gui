@@ -49,6 +49,7 @@ pub async fn start_chat_listener(
                 .arg("--yes")
                 .arg(&code_clone)
                 .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                .env("LANG", "C.UTF-8")
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .spawn()
@@ -58,6 +59,7 @@ pub async fn start_chat_listener(
             let mut child = tCommand::new("croc")
                 .arg("--yes")
                 .env("CROC_SECRET", code_clone.clone()) // 设置环境变量
+                .env("LANG", "C.UTF-8")
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .spawn()
@@ -75,8 +77,8 @@ pub async fn start_chat_listener(
             stderr.read_to_end(&mut stderr_buf).await.unwrap();
             let stderr_str = String::from_utf8_lossy(&stderr_buf);
 
-            println!("Listener stdout:{stdout_str}");
-            println!("Listener stderr:{stderr_str}");
+            println!("Listener stdout[{code_clone}]:{stdout_str}");
+            println!("Listener stderr[{code_clone}]:{stderr_str}");
 
             let status = child.wait().await;
 
@@ -96,7 +98,7 @@ pub async fn start_chat_listener(
                 }
             }
             // 每 10 秒再检测一次
-            sleep(Duration::from_secs(5)).await;
+            sleep(Duration::from_secs(8)).await;
         }
 
         println!("Code:{code_clone}\nlistener stopped");

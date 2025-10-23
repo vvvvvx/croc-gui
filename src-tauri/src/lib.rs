@@ -21,11 +21,14 @@ use setting::{load_config, save_config, ConfigState};
 //use std::fs::{self};
 use once_cell::sync::Lazy;
 use std::sync::Arc;
+use std::thread;
+//use std::time::Duration;
 use str_oper::*;
 use tauri::Emitter;
 use tauri::State;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex;
+use tokio::time::{timeout, Duration};
 //use std::path::Path;
 //use tauri_plugin_shell;
 
@@ -160,7 +163,7 @@ async fn send_files(
                                 .emit("croc-send-file-progress", Some(EmitProgress{croc_code:code_str.clone(),files: files.clone()}))
                                 .unwrap();
                             window
-                                .emit("croc-send-file-ready", Some(EmitInfo{croc_code:code_str.clone(),info: "文件已准备好，请把Code给对方以开始接收。\n【Code已复制，直接粘贴】\nFiles ready,provide the Code to recipient to receive.\n【Code copied to clipboard】".to_string()}))
+                                .emit("croc-send-file-ready", Some(EmitInfo{croc_code:code_str.clone(),info: "文件已准备好，请把Code给对方以开始接收。\n【Code已复制，直接粘贴】\n\nFiles ready,provide the Code to recipient to receive.\n【Code copied to clipboard】".to_string()}))
                                 .unwrap();
                         }
 
@@ -532,74 +535,99 @@ async fn send_text(
     croc_args.push(msg.clone());
 
     println!("Running croc with args: {croc_args:?}");
-    let code2 = code.clone();
-    tokio::task::spawn_blocking(move || {
-        #[cfg(not(windows))]
-        let mut child: Child = if !code2.trim().is_empty() {
-            Command::new("croc")
-                .args(croc_args)
-                .env("CROC_SECRET", code2.clone()) // 设置环境变量
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-                .expect("Failed to start croc command")
-        } else {
-            Command::new("croc")
-                .args(croc_args)
-                .env("CROC_NOUI", true.to_string())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-                .expect("Failed to start croc command")
-        };
 
-        #[cfg(windows)]
-        let mut child = Command::new("croc")
+    //let code2 = code.clone();
+    // tokio::task::spawn_blocking(move || {
+    #[cfg(not(windows))]
+    let mut child: tChild = if !code.trim().is_empty() {
+        tCommand::new("croc")
             .args(croc_args)
-            // windows下需要设置不显示命令行窗口
-            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .env("CROC_SECRET", code.clone()) // 设置环境变量
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .expect("Failed to start croc command");
+            .expect("Failed to start croc command")
+    } else {
+        tCommand::new("croc")
+            .args(croc_args)
+            .env("CROC_NOUI", true.to_string())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("Failed to start croc command")
+    };
 
-        let mut code_str = "".to_string();
-        if !code2.trim().is_empty() {
-            code_str=code2.trim().to_string();
-        }
-        // 处理 croc 输出
-        let mut full_output="".to_string();
+    #[cfg(windows)]
+    let mut child = tCommand::new("croc")
+        .args(croc_args)
+        // windows下需要设置不显示命令行窗口
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Failed to start croc command");
 
-        if let Some(stderr) = child.stderr.take() {
-            let mut reader = io::BufReader::new(stderr);
-            let mut buffer = [0u8; 4096];
+    // 初始化共享字符串
+    let code_shared = Arc::new(Mutex::new(code.clone().trim().to_string()));
+
+    // 处理 croc 输出
+    let mut full_output = "".to_string();
+
+    if let Some(stderr) = child.stderr.take() {
+        let win1 = window.clone();
+        // 克隆到 stderr 异步任务
+        let code_stderr = code_shared.clone();
+        let mut reader = BufReader::new(stderr);
+        let mut buffer = [0u8; 4096];
+        tokio::spawn(async move {
+            let mut code_str1 = code_stderr.lock().await.clone();
+
             loop {
-                match reader.read(&mut buffer) {
+                match reader.read(&mut buffer).await {
                     Ok(0) => break, // EOF
                     Ok(n) => {
                         let output = String::from_utf8_lossy(&buffer[..n]).to_string();
-                        println!("croc output: {output}");
+                        println!("send msg stderr: {output}");
 
                         if let Some(code) = get_code(&output) {
                             // println!("Extracted code: {}", code);
-                            println!("Output from [stderr].");
-                            window.emit("croc-send-text-code", Some(code.to_string())).unwrap();
-                            code_str=code.to_string();
+                            // println!("Output from [stderr].");
+                            win1.emit("croc-send-text-code", Some(code.to_string()))
+                                .unwrap();
+                            *code_stderr.lock().await = code.clone();
+                            code_str1 = code.to_string();
                         }
 
                         if let Some(status) = get_status(&output) {
                             // println!("Extracted status: {}", status);
-                            window
-                                .emit("croc-send-text-status", Some(EmitInfo{croc_code:code_str.clone(),info: status.to_string()}))
-                                .unwrap();
+                            win1.emit(
+                                "croc-send-text-status",
+                                Some(EmitInfo {
+                                    croc_code: code_str1.clone(),
+                                    info: status.to_string(),
+                                }),
+                            )
+                            .unwrap();
                         }
                         if output.contains("not enough open ports") {
-                            window
-                                .emit("croc-send-error", Some(EmitInfo{croc_code:code_str.clone(),info:"太多发送进程未接收，通道池已满，关闭程序以清理。\nToo many sending process have not been received,close this program to kill.".to_string()}))
+                            win1
+                                .emit("croc-send-error", Some(EmitInfo{croc_code:code_str1.clone(),info:"太多发送进程未接收，通道池已满，关闭程序以清理。\nToo many sending process have not been received,close this program to kill.".to_string()}))
                                 .unwrap();
                             // return "Repeated sending.".to_string();
                         }
-                        full_output+=output.as_str();
+                        if output.contains("could not secure channel") {
+                            win1.emit(
+                                "croc-send-error",
+                                Some(EmitInfo {
+                                    croc_code: code_str1.clone(),
+                                    info: "could not secure channel\n\n稍后再试".to_string(),
+                                }),
+                            )
+                            .unwrap();
+                            // return "Repeated sending.".to_string();
+                        }
+
+                        full_output += output.as_str();
                         // window
                         //     .emit("croc-output", Some(output.to_string()))
                         //     .unwrap();
@@ -610,28 +638,138 @@ async fn send_text(
                     }
                 }
             }
-        }
-        // if let Some(status) = get_status(&full_output) {
-        //     // println!("Extracted status: {}", status);
-        //     window
-        //         .emit("croc-send-text-status", Some(EmitInfo{croc_code:code_str.clone(),info: status.to_string()}))
-        //         .unwrap();
-        // }
-        let status = child.wait().expect("Command wasn't running");
-
-        if status.success() {
-            window
-                .emit("croc-send-text-success", Some(EmitInfo{croc_code:code_str.clone().to_string(),info: msg}))
+            if full_output.contains("could not secure channel") {
+                win1.emit(
+                    "croc-send-error",
+                    Some(EmitInfo {
+                        croc_code: code_str1.clone(),
+                        info: "Could not secure channel,retry later.\n\n稍后再试".to_string(),
+                    }),
+                )
                 .unwrap();
-        } else {
-            emit_exit_info(window.clone(), "send", code_str.clone(), status.code().unwrap()); 
-        }
-        // window.emit("croc-receive-file-done", Some("File receiving finished.".to_string()))
-        //     .unwrap();
+                // return "Repeated sending.".to_string();
+            }
+        });
+    }
+    // let mut child=child_arc.lock().unwrap();
+    if let Some(mut stdout) = child.stdout.take() {
+        let code_stdout = code_shared.clone();
+        let win2 = window.clone();
 
-    })
-    .await
-    .map_err(|e| e.to_string())?;
+        tokio::spawn(async move {
+            let mut stdout_buf = Vec::new();
+            stdout.read_to_end(&mut stdout_buf).await.unwrap();
+            // croc send --text 时，正文在stdout
+            let full_out = String::from_utf8_lossy(&stdout_buf).to_string();
+            println!("send msg stdout:{full_out}");
+            if full_out.contains("could not secure channel") {
+                let code_str2 = code_stdout.lock().await.clone();
+
+                win2.emit(
+                    "croc-send-error",
+                    Some(EmitInfo {
+                        croc_code: code_str2.clone(),
+                        info: "Could not secure channel,retry later.\n\n稍后再试".to_string(),
+                    }),
+                )
+                .unwrap();
+            }
+
+            if full_out.contains("gracefully refusing using the public relay") {
+                let code_str2 = code_stdout.lock().await.clone();
+                win2.emit(
+                    "croc-send-error",
+                    Some(EmitInfo {
+                        croc_code: code_str2.clone(),
+                        info: "发送被拒绝，稍后再试\nThe sending was refused,retry later. "
+                            .to_string(),
+                    }),
+                )
+                .unwrap();
+            }
+        });
+    }
+
+    let win3 = window.clone();
+    let code_timeout = code_shared.clone();
+
+    let code_str3 = code_timeout.lock().await.clone();
+    if code_str3.starts_with("s1111") || code_str3.starts_with("r2222") {
+        match timeout(Duration::from_secs(30), child.wait()).await {
+            Ok(Ok(status)) => {
+                let code_str3 = code_timeout.lock().await.clone();
+                if status.success() {
+                    win3.emit(
+                        "croc-send-text-success",
+                        Some(EmitInfo {
+                            croc_code: code_str3.clone().to_string(),
+                            info: msg,
+                        }),
+                    )
+                    .unwrap();
+                } else {
+                    emit_exit_info(win3, "send", code_str3.clone(), status.code().unwrap());
+                }
+            }
+            Ok(Err(e)) => {
+                eprint!("Error while waiting process exit.");
+                let code_str3 = code_timeout.lock().await.clone();
+                win3.emit(
+                    "croc-send-error",
+                    Some(EmitInfo {
+                        croc_code: code_str3.clone(),
+                        info: format!("Process error:{e}"),
+                    }),
+                )
+                .unwrap();
+            }
+            Err(_) => {
+                let code_str3 = code_timeout.lock().await.clone();
+                if code_str3.starts_with("s1111") || code_str3.starts_with("r2222") {
+                    eprint!("Sending msg timeout, killing...\n");
+                    let _ = child.kill().await;
+                    let _ = win3.emit(
+                        "croc-send-error",
+                        Some(EmitInfo {
+                            croc_code: code_str3.clone(),
+                            info: "发送超时，重试。\nThe last msg sending timeout, retry."
+                                .to_string(),
+                        }),
+                    );
+                }
+            }
+        }
+    } else {
+        match child.wait().await {
+            Ok(status) => {
+                let code_str3 = code_timeout.lock().await.clone();
+                if status.success() {
+                    win3.emit(
+                        "croc-send-text-success",
+                        Some(EmitInfo {
+                            croc_code: code_str3.clone().to_string(),
+                            info: msg,
+                        }),
+                    )
+                    .unwrap();
+                } else {
+                    emit_exit_info(win3, "send", code_str3.clone(), status.code().unwrap());
+                }
+            }
+            Err(e) => {
+                eprint!("Error while waiting process exit.");
+                let code_str3 = code_timeout.lock().await.clone();
+                win3.emit(
+                    "croc-send-error",
+                    Some(EmitInfo {
+                        croc_code: code_str3.clone(),
+                        info: format!("Process error:{e}"),
+                    }),
+                )
+                .unwrap();
+            }
+        }
+    }
 
     Ok(())
 }
