@@ -80,7 +80,7 @@ async fn send_files(
     if files.is_empty() {
         window
             .emit(
-                "croc-send-error",
+                "croc-send-file-error",
                 Some(EmitInfo {
                     croc_code: code.clone().trim().to_string(),
                     info: "No files to send".to_string(),
@@ -209,7 +209,7 @@ async fn send_files(
                         }
                         if output.contains("not enough open ports") {
                             window
-                                .emit("croc-send-error", Some(EmitInfo{croc_code:code_str.clone(),info: "太多发送进程未接收，通道池已满，关闭程序以清理。\nToo many sending process have not been received,close this program to kill.".to_string()}))
+                                .emit("croc-send-file-error", Some(EmitInfo{croc_code:code_str.clone(),info: "太多发送进程未接收，通道池已满，关闭程序以清理。\nToo many sending process have not been received,close this program to kill.".to_string()}))
                                 .unwrap();
                             // return "Repeated sending.".to_string();
                         }
@@ -509,7 +509,7 @@ async fn send_text(
     if msg.trim().is_empty() {
         window
             .emit(
-                "croc-send-error",
+                "croc-send-text-error",
                 Some(EmitInfo {
                     croc_code: code.clone().trim().to_string(),
                     info: "消息不能为空".to_string(),
@@ -611,13 +611,13 @@ async fn send_text(
                         }
                         if output.contains("not enough open ports") {
                             win1
-                                .emit("croc-send-error", Some(EmitInfo{croc_code:code_str1.clone(),info:"太多发送进程未接收，通道池已满，关闭程序以清理。\nToo many sending process have not been received,close this program to kill.".to_string()}))
+                                .emit("croc-send-text-error", Some(EmitInfo{croc_code:code_str1.clone(),info:"太多发送进程未接收，通道池已满，关闭程序以清理。\nToo many sending process have not been received,close this program to kill.".to_string()}))
                                 .unwrap();
                             // return "Repeated sending.".to_string();
                         }
                         if output.contains("could not secure channel") {
                             win1.emit(
-                                "croc-send-error",
+                                "croc-send-text-error",
                                 Some(EmitInfo {
                                     croc_code: code_str1.clone(),
                                     info: "could not secure channel\n\n稍后再试".to_string(),
@@ -640,7 +640,7 @@ async fn send_text(
             }
             if full_output.contains("could not secure channel") {
                 win1.emit(
-                    "croc-send-error",
+                    "croc-send-text-error",
                     Some(EmitInfo {
                         croc_code: code_str1.clone(),
                         info: "Could not secure channel,retry later.\n\n稍后再试".to_string(),
@@ -666,7 +666,7 @@ async fn send_text(
                 let code_str2 = code_stdout.lock().await.clone();
 
                 win2.emit(
-                    "croc-send-error",
+                    "croc-send-text-error",
                     Some(EmitInfo {
                         croc_code: code_str2.clone(),
                         info: "Could not secure channel,retry later.\n\n稍后再试".to_string(),
@@ -678,7 +678,7 @@ async fn send_text(
             if full_out.contains("gracefully refusing using the public relay") {
                 let code_str2 = code_stdout.lock().await.clone();
                 win2.emit(
-                    "croc-send-error",
+                    "croc-send-text-error",
                     Some(EmitInfo {
                         croc_code: code_str2.clone(),
                         info: "发送被拒绝，稍后再试\nThe sending was refused,retry later. "
@@ -694,82 +694,130 @@ async fn send_text(
     let code_timeout = code_shared.clone();
 
     let code_str3 = code_timeout.lock().await.clone();
-    if code_str3.starts_with("s1111") || code_str3.starts_with("r2222") {
-        match timeout(Duration::from_secs(30), child.wait()).await {
-            Ok(Ok(status)) => {
-                let code_str3 = code_timeout.lock().await.clone();
-                if status.success() {
-                    win3.emit(
-                        "croc-send-text-success",
-                        Some(EmitInfo {
-                            croc_code: code_str3.clone().to_string(),
-                            info: msg,
-                        }),
-                    )
-                    .unwrap();
-                } else {
-                    emit_exit_info(win3, "send", code_str3.clone(), status.code().unwrap());
-                }
-            }
-            Ok(Err(e)) => {
-                eprint!("Error while waiting process exit.");
-                let code_str3 = code_timeout.lock().await.clone();
+
+    println!("send_text code:{code_str3}");
+
+    let time_secs = if code_str3.starts_with("s1111") || code_str3.starts_with("r2222") {
+        30
+    } else {
+        600
+    };
+    //if code_str3.starts_with("s1111") || code_str3.starts_with("r2222") {
+    match timeout(Duration::from_secs(time_secs), child.wait()).await {
+        Ok(Ok(status)) => {
+            let code_str3 = code_timeout.lock().await.clone();
+            if status.success() {
                 win3.emit(
-                    "croc-send-error",
+                    "croc-send-text-success",
                     Some(EmitInfo {
-                        croc_code: code_str3.clone(),
-                        info: format!("Process error:{e}"),
+                        croc_code: code_str3.clone().to_string(),
+                        info: msg,
                     }),
                 )
                 .unwrap();
-            }
-            Err(_) => {
-                let code_str3 = code_timeout.lock().await.clone();
-                if code_str3.starts_with("s1111") || code_str3.starts_with("r2222") {
-                    eprint!("Sending msg timeout, killing...\n");
-                    let _ = child.kill().await;
-                    let _ = win3.emit(
-                        "croc-send-error",
-                        Some(EmitInfo {
-                            croc_code: code_str3.clone(),
-                            info: "发送超时，重试。\nThe last msg sending timeout, retry."
-                                .to_string(),
-                        }),
-                    );
-                }
+            } else {
+                emit_exit_info(win3, "send", code_str3.clone(), status.code().unwrap());
             }
         }
-    } else {
-        match child.wait().await {
-            Ok(status) => {
-                let code_str3 = code_timeout.lock().await.clone();
-                if status.success() {
-                    win3.emit(
-                        "croc-send-text-success",
-                        Some(EmitInfo {
-                            croc_code: code_str3.clone().to_string(),
-                            info: msg,
-                        }),
-                    )
-                    .unwrap();
-                } else {
-                    emit_exit_info(win3, "send", code_str3.clone(), status.code().unwrap());
-                }
-            }
-            Err(e) => {
-                eprint!("Error while waiting process exit.");
-                let code_str3 = code_timeout.lock().await.clone();
-                win3.emit(
-                    "croc-send-error",
-                    Some(EmitInfo {
-                        croc_code: code_str3.clone(),
-                        info: format!("Process error:{e}"),
-                    }),
-                )
-                .unwrap();
-            }
+        Ok(Err(e)) => {
+            eprint!("Error while waiting process exit.");
+            let code_str3 = code_timeout.lock().await.clone();
+            win3.emit(
+                "croc-send-text-error",
+                Some(EmitInfo {
+                    croc_code: code_str3.clone(),
+                    info: format!("Process error:{e}"),
+                }),
+            )
+            .unwrap();
+        }
+        Err(_) => {
+            let code_str3 = code_timeout.lock().await.clone();
+            // if code_str3.starts_with("s1111") || code_str3.starts_with("r2222") {
+            eprint!("Sending msg timeout, killing...\n");
+            let _ = child.kill().await;
+            let _ = win3.emit(
+                "croc-send-text-error",
+                Some(EmitInfo {
+                    croc_code: code_str3.clone(),
+                    info: "发送超时，重试。\nThe last msg sending timeout, retry.".to_string(),
+                }),
+            );
+            // }
         }
     }
+    //   } else {
+    // else waiting 10 minutes to kill
+    // match timeout(Duration::from_secs(600), child.wait()).await {
+    //     Ok(Ok(status)) => {
+    //         let code_str3 = code_timeout.lock().await.clone();
+    //         if status.success() {
+    //             win3.emit(
+    //                 "croc-send-text-success",
+    //                 Some(EmitInfo {
+    //                     croc_code: code_str3.clone().to_string(),
+    //                     info: msg,
+    //                 }),
+    //             )
+    //             .unwrap();
+    //         } else {
+    //             emit_exit_info(win3, "send", code_str3.clone(), status.code().unwrap());
+    //         }
+    //     }
+    //     Ok(Err(e)) => {
+    //         eprint!("Error while waiting process exit.");
+    //         let code_str3 = code_timeout.lock().await.clone();
+    //         win3.emit(
+    //             "croc-send-text-error",
+    //             Some(EmitInfo {
+    //                 croc_code: code_str3.clone(),
+    //                 info: format!("Process error:{e}"),
+    //             }),
+    //         )
+    //         .unwrap();
+    //     }
+    //     Err(_) => {
+    //         eprint!("Sending msg timeout, killing...\n");
+    //         let _ = child.kill().await;
+    //         let _ = win3.emit(
+    //             "croc-send-text-error",
+    //             Some(EmitInfo {
+    //                 croc_code: code_str3.clone(),
+    //                 info: "发送超时，重试。\nThe last msg sending timeout, retry.".to_string(),
+    //             }),
+    //         );
+    //     }
+    // }
+
+    // match child.wait().await {
+    //     Ok(status) => {
+    //         let code_str3 = code_timeout.lock().await.clone();
+    //         if status.success() {
+    //             win3.emit(
+    //                 "croc-send-text-success",
+    //                 Some(EmitInfo {
+    //                     croc_code: code_str3.clone().to_string(),
+    //                     info: msg,
+    //                 }),
+    //             )
+    //             .unwrap();
+    //         } else {
+    //             emit_exit_info(win3, "send", code_str3.clone(), status.code().unwrap());
+    //         }
+    //     }
+    //     Err(e) => {
+    //         eprint!("Error while waiting process exit.");
+    //         let code_str3 = code_timeout.lock().await.clone();
+    //         win3.emit(
+    //             "croc-send-error",
+    //             Some(EmitInfo {
+    //                 croc_code: code_str3.clone(),
+    //                 info: format!("Process error:{e}"),
+    //             }),
+    //         )
+    //         .unwrap();
+    //     }
+    // }
 
     Ok(())
 }

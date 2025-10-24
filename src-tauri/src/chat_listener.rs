@@ -98,7 +98,7 @@ pub async fn start_chat_listener(
                 }
             }
             // 每 10 秒再检测一次
-            sleep(Duration::from_secs(8)).await;
+            sleep(Duration::from_secs(7)).await;
         }
 
         println!("Code:{code_clone}\nlistener stopped");
