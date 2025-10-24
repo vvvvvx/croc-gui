@@ -123,6 +123,9 @@ const sendPathsTmp = ref<fileItem[]>([]); //在发送文件时，在生成code�
 const dropdownCodesListOpen = ref(false);
 const wrapperRef = ref<HTMLElement | null>(null);
 const Tab = (window as any).bootstrap?.Tab;
+const lastMsg = ref<string>("");  // the last msg sent, if send failed, fill it to input box ,and retry.
+const edittingMsg = ref<string>(""); // editting and have not send.
+const isResend=ref<boolean>(false); // when send failed, resend flag
 
 const config =ref< sets.AppConfig >( {
         transfers: 8,
@@ -964,16 +967,22 @@ onMounted(async () => {
     console.error("croc send error:", message);
   });
 
-  listenSendTextError = await listen("croc-send-text-error", (event) => {
+  listenSendTextError = await listen("croc-send-text-error",async (event) => {
     const message = event.payload as emitInfo;
     const mainCode=msgGetMainCode(message.croc_code);
     const memo=getMemo(mainCode,Type.TextChat);
-    darkAlert(formatMsgWithCode(mainCode,memo,message.info));
+    //if (!(mainCode===crocCode.value && transferType.value===Type.TextChat)){
+      darkAlert(formatMsgWithCode(mainCode,memo,message.info));
+    //}
     //isSending.value = false;
     if(isWaiting(message.croc_code)){
       deleteCode(message.croc_code);
     }
     msgUpdateLastMsgStatus(mainCode,MsgSendStatus.Failed);
+    edittingMsg.value=inputText.value; 
+    inputText.value=lastMsg.value;
+    isResend.value=true;
+
     console.error("croc send error:", message);
   });
   listenReceiveError = await listen("croc-receive-error", (event) => {
@@ -1165,8 +1174,14 @@ onMounted(async () => {
     }
     // record the msg
     msgAdd(mainCode,inputText.value.trim(),MsgType.To);
-
-    inputText.value="";
+    if(isResend.value){
+      isResend.value=false;
+      lastMsg.value=inputText.value;
+      inputText.value=edittingMsg.value;
+    }else{
+      lastMsg.value=inputText.value;
+      inputText.value="";
+    }
     //darkAlert("Code: "+code+"\n\n聊天已就绪，把Code发给对方开始聊天。\n【Code已复制，直接粘贴】\n\nChat ready, provide the Code to recipient to chat.\n【Code copied to clipboard】");
     //darkAlert(memo);
     console.log("Received croc code:", crocCode.value);
@@ -1256,7 +1271,7 @@ onMounted(async () => {
       }
     }
     //alert("listenReceiveTextMsg mainCode:"+mainCode);
-    if(mainCode!==""){
+    if(mainCode!=="" && msg.info.trim()!==""){
       // record the msg
       msgAdd(mainCode,msg.info.trim(),MsgType.From);
       // set isListenning status to false
@@ -1285,8 +1300,8 @@ onMounted(async () => {
         input:rememberChoice ? "y" : 'n'});
       return;
     }
-
-    const { answer,remember } =await  darkConfirmRemember("Code: "+msg.croc_code+"\n\n"+msg.info+"\n\n") ;
+    let memo=getMemo(msg.croc_code,Type.FileReceive);
+    const { answer,remember } =await  darkConfirmRemember(formatMsgWithCode(msg.croc_code,memo,msg.info)) ;
     if(remember){
       rememberChoice=answer;
     }
