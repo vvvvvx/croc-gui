@@ -1,4 +1,9 @@
+
 <script setup lang="ts">
+
+window.addEventListener('dragover', e => e.preventDefault())
+window.addEventListener('drop', e => e.preventDefault())
+
 import { onMounted,onBeforeUnmount,ref,nextTick,watch,computed} from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -293,7 +298,59 @@ async function selectFile() {
   //console.log(sendPaths);
   console.log("selectFile(),sendPathsTmp:",sendPathsTmp.value);
 }
+// 仅读取一层目录
+function readEntries(entry: any, basePath = ''): Promise<fileItem[]> {
+  return new Promise((resolve) => {
+    if (entry.isFile) {
+      entry.file((file: File) => {
+        console.log("reading files:",file.name);
+        resolve([
+          {
+            file: basePath + file.name,
+            status: 'Pending',
+            is_dir: false,
+          },
+        ])
+      })
+    } else if (entry.isDirectory) {
+      const reader = entry.createReader();
+      reader.readEntries((entries: any[]) => {
+        const result: fileItem[] = entries.map((e) => ({
+          file: basePath + e.name,
+          status: 'Pending',
+          is_dir: e.isDirectory,
+        }));
+        resolve(result);
+      });
+    } else {
+      resolve([]);
+    }
+  });
+}
 
+async function handleDrop(e: DragEvent) {
+  console.log("Droping files");
+  const items = e.dataTransfer?.items
+  if (!items) return
+
+  const tmpList: fileItem[] = []
+
+  for (const item of items) {
+    const entry = item.webkitGetAsEntry?.()
+    if (!entry) continue
+
+    const entries = await readEntries(entry)
+    if (isFolder.value) {
+      // 目录模式：只保留目录
+      tmpList.push(...entries.filter((e) => e.is_dir))
+    } else {
+      // 文件模式：只保留文件
+      tmpList.push(...entries.filter((e) => !e.is_dir))
+    }
+  }
+  console.log("Drop files:",tmpList);
+  sendPathsTmp.value = tmpList
+}
 
 function selectCode(li: HTMLElement) {
   // remember current Process first
@@ -1469,7 +1526,7 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
         <!-- Second tab content -->
         <div class="tab-content pt-0" style="height:calc(99vh - 120px);border-top:1px solid #ddd;" id="fileTabContent">
           <!-- Send File content -->
-          <div class="tab-pane fade show active"  id="send-file-pane" style="padding:1rem;" role="tabpanel" aria-labelledby="send-file-tab">
+          <div class="tab-pane fade show active"  id="send-file-pane" @dragover.prevent @drop.prevent="handleDrop" style="padding:1rem;" role="tabpanel" aria-labelledby="send-file-tab">
             <div class="fixed-pane-container mb-0">
               <div class="header-area mb-0 pb-0">
                 <div class="row">
@@ -1510,7 +1567,7 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
                   </div>
                 </div>
               </div> <!-- header-area row end -->
-              <div class="scrollable-area">
+              <div class="scrollable-area" >
                 <div class="row">
                   <div class="col-12">
                     <div class="content scrollable flex-height" id="sendTable" v-if="sendPaths && sendPaths.length > 0">
