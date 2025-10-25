@@ -1,8 +1,8 @@
 
 <script setup lang="ts">
 
-window.addEventListener('dragover', e => e.preventDefault())
-window.addEventListener('drop', e => e.preventDefault())
+//window.addEventListener('dragover', e => e.preventDefault());
+//window.addEventListener('drop', e => e.preventDefault());
 
 import { onMounted,onBeforeUnmount,ref,nextTick,watch,computed} from "vue";
 import { invoke } from "@tauri-apps/api/core";
@@ -99,6 +99,7 @@ enum MsgSendStatus{
   Failed  = " ( Failed )"
 }
 
+
 const curVersion=ref(''); //当前版本号
 const latestVersion=ref(''); //最新版本号
 const latestVersionDesc=ref(''); //最新版本描述
@@ -156,7 +157,7 @@ const formatedChat= computed<msgDisplay[]> (()=>{
   return chat.msgList.map(entry=>{
     let memo=  entry.type===MsgType.From ? chat.memo : "Me";
     //let text = `[ ${entry.type} ] [ ${chat.memo} ] ${entry.timestamp}\n${entry.msg}\n\n`;
-    let text = `[ ${memo} ] ${entry.timestamp}\n${entry.msg}\n\n`;
+    let text = `[ ${memo} ] ${entry.timestamp}\n${entry.msg}\n`;
     for(const {regex,color} of colorRules){
       text = text.replace(regex,`<span style="color:${color};">$&</span>`)
     }
@@ -250,10 +251,12 @@ const receivePaths = computed<fileItem[]>(() => {
 
 }); // received file or folder paths 
 const chatEstablished = computed<boolean>(()=>{
-
   if(crocCode.value.trim().length===0) return false;
   return msgChatEstablishedStatusGet(crocCode.value);
 });
+
+
+
 let listenSendFileError: UnlistenFn | null = null;
 let listenSendTextError: UnlistenFn | null = null;
 let listenReceiveError: UnlistenFn | null = null;
@@ -298,6 +301,7 @@ async function selectFile() {
   //console.log(sendPaths);
   console.log("selectFile(),sendPathsTmp:",sendPathsTmp.value);
 }
+/*
 // 仅读取一层目录
 function readEntries(entry: any, basePath = ''): Promise<fileItem[]> {
   return new Promise((resolve) => {
@@ -351,7 +355,7 @@ async function handleDrop(e: DragEvent) {
   console.log("Drop files:",tmpList);
   sendPathsTmp.value = tmpList
 }
-
+*/
 function selectCode(li: HTMLElement) {
   // remember current Process first
   remCurProcess();
@@ -495,7 +499,7 @@ function onClickFileTab(){
   // reload the last Process at new Tab
   reloadLastProcess(transferType.value);
   newArrivalStatusSet(crocCode.value,transferType.value,false);
-  
+  switchTab();
 }
 function onClickFileSend(){
   // remember current Process first at this Tab.
@@ -505,6 +509,7 @@ function onClickFileSend(){
   // reload the last Process at new Tab
   reloadLastProcess(transferType.value);
   newArrivalStatusSet(crocCode.value,transferType.value,false);
+  switchTab();
 }
 function onClickFileReceive(){
   // remember current Process first at this Tab.
@@ -513,6 +518,7 @@ function onClickFileReceive(){
   // reload the last Process at new Tab
   reloadLastProcess(transferType.value);
   newArrivalStatusSet(crocCode.value,transferType.value,false);
+  switchTab();
 }
 function onClickTextChat(){
   console.log("onClickTextChat transferType:",transferType.value);
@@ -522,7 +528,40 @@ function onClickTextChat(){
   // reload the last Process at new Tab
   reloadLastProcess(transferType.value);
   newArrivalStatusSet(crocCode.value,transferType.value,false);
+  switchTab();
 }
+
+function handleKeydown(e: KeyboardEvent) {
+  // Mac 下用 metaKey 代替 AltKey
+  if (e.altKey && e.key.toLowerCase() === 's') {
+    e.preventDefault(); // 防止触发浏览器默认行为
+    if(transferType.value===Type.FileSend) sendFiles();
+    if(transferType.value===Type.TextChat) sendText();
+  }
+
+  if (e.altKey && e.key.toLowerCase() === 'r') {
+    e.preventDefault(); // 防止触发浏览器默认行为
+    if(transferType.value===Type.FileReceive) receiveFiles();
+    if(transferType.value===Type.TextChat) receiveText();
+  }
+  if (e.altKey && e.key.toLowerCase() === 'f') {
+    e.preventDefault(); // 防止触发浏览器默认行为
+    onClickFileTab();
+  }
+  if (e.altKey && e.key.toLowerCase() === 't') {
+    e.preventDefault(); // 防止触发浏览器默认行为
+    onClickTextChat();
+  }
+  if (e.altKey && e.key.toLowerCase() === 'd') {
+    e.preventDefault(); // 防止触发浏览器默认行为
+    onClickFileSend();
+  }
+  if (e.altKey && e.key.toLowerCase() === 'v') {
+    e.preventDefault(); // 防止触发浏览器默认行为
+    onClickFileReceive();
+  }
+}
+
 function isWaiting(code:string):boolean{
   return waitingCodesList.value.includes(code);
 }
@@ -598,6 +637,15 @@ function chatGetRecordsStr(code:string):string {
   }).join("");
 
 }
+function msgPop(code:string){
+  const exist= chatProcessList.value.find( c => c.croc_code.includes(code));
+  if (exist){
+    exist.msgList.pop();
+  }else{
+    darkAlert("错误：记录聊天消息时，找不到对应聊天会话。\n\n");
+  }
+  
+}
 // 添加消息
 function msgAdd(code:string,msg:string,fromOrTo:string){
   //查找会话
@@ -606,7 +654,7 @@ function msgAdd(code:string,msg:string,fromOrTo:string){
       croc_code:code,
       type: fromOrTo,// To or From
       timestamp: getTime(),
-      msg:msg
+      msg:msg.trim()
   };
   if (exist){
     exist.msgList.push( newMsg );
@@ -1012,6 +1060,7 @@ onMounted(async () => {
   console.log( config.value);
 
   document.addEventListener("click", clickOutsideHandler);
+  window.addEventListener('keydown', handleKeydown);
 
   listenSendFileError = await listen("croc-send-file-error", (event) => {
     const message = event.payload as emitInfo;
@@ -1227,20 +1276,21 @@ onMounted(async () => {
       const input_memo= "Chat-"+(textChatCount.value as number + 1); //await askUserInput("给新任务Code起个别名，以便区别查看多任务:");
       msgAddProcess(code,input_memo,Role.Sender);
       memo.value=input_memo;
-      //darkAlert(memo);
     }
     // record the msg
-    msgAdd(mainCode,inputText.value.trim(),MsgType.To);
     if(isResend.value){
+      //先删除失败的最后那条记录，再添加
+      msgPop(mainCode);
+      msgAdd(mainCode,inputText.value.trim(),MsgType.To);
       isResend.value=false;
       lastMsg.value=inputText.value;
       inputText.value=edittingMsg.value;
     }else{
+      msgAdd(mainCode,inputText.value.trim(),MsgType.To);
       lastMsg.value=inputText.value;
       inputText.value="";
     }
     //darkAlert("Code: "+code+"\n\n聊天已就绪，把Code发给对方开始聊天。\n【Code已复制，直接粘贴】\n\nChat ready, provide the Code to recipient to chat.\n【Code copied to clipboard】");
-    //darkAlert(memo);
     console.log("Received croc code:", crocCode.value);
   });
 
@@ -1433,6 +1483,7 @@ onBeforeUnmount(() => {
   listenReceiveTextStatus?.();
   listenConfirm?.();
   document.removeEventListener("click", clickOutsideHandler);
+  window.removeEventListener('keydown', handleKeydown);
 });
 
 </script>
@@ -1444,12 +1495,12 @@ onBeforeUnmount(() => {
       <div class="col-5 mb-0" style="margin-bottom:0px;padding-bottom:0px;" >
         <ul class="nav nav-tabs mb-0 " id="topTab" role="tablist">
           <li class="nav-item" role="presentation">
-            <button class="nav-link active" @click="onClickFileTab" style="margin-left:10px;"  id="file-tab" data-bs-toggle="tab" data-bs-target="#file-pane" type="button" role="tab">
+            <button class="nav-link active" @click="onClickFileTab" style="margin-left:10px;"  id="file-tab" data-bs-toggle="tab" data-bs-target="#file-pane" type="button" role="tab" title="Hotkey: Alt-F" >
               文件传输<br>File Transfer
             </button>
           </li>
           <li class="nav-item" role="presentation">
-            <button class="nav-link" @click="onClickTextChat" id="chat-tab" data-bs-toggle="tab" data-bs-target="#chat-pane" type="button" role="tab">
+            <button class="nav-link" @click="onClickTextChat" id="chat-tab" data-bs-toggle="tab" data-bs-target="#chat-pane" type="button" role="tab" title="Hotkey: Alt-T" >
               文本聊天<br>Text Chat
             </button>
           </li>
@@ -1513,12 +1564,12 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
         <!-- File Transfer content -->
         <ul class="nav nav-tabs mb-0" style="margin-left:10px;" id="secondTab" role="tablist">
           <li class="nav-item" role="presentation">
-            <button class="nav-link active" @click="onClickFileSend" id="send-file-tab" data-bs-toggle="tab" data-bs-target="#send-file-pane" type="button" role="tab">
+            <button class="nav-link active" @click="onClickFileSend" id="send-file-tab" data-bs-toggle="tab" data-bs-target="#send-file-pane" type="button" role="tab" title="Hotkey: Alt-D" >
               发送/Send
             </button>
           </li>
           <li class="nav-item" role="presentation">
-            <button class="nav-link" @click="onClickFileReceive" id="receive-file-tab" data-bs-toggle="tab" data-bs-target="#receive-file-pane" type="button" role="tab">
+            <button class="nav-link" @click="onClickFileReceive" id="receive-file-tab" data-bs-toggle="tab" data-bs-target="#receive-file-pane" type="button" role="tab" title="Hotkey: Alt-V" >
               接收/Receive
             </button>
           </li>
@@ -1526,7 +1577,7 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
         <!-- Second tab content -->
         <div class="tab-content pt-0" style="height:calc(99vh - 120px);border-top:1px solid #ddd;" id="fileTabContent">
           <!-- Send File content -->
-          <div class="tab-pane fade show active"  id="send-file-pane" @dragover.prevent @drop.prevent="handleDrop" style="padding:1rem;" role="tabpanel" aria-labelledby="send-file-tab">
+          <div class="tab-pane fade show active"  id="send-file-pane" style="padding:1rem;" role="tabpanel" aria-labelledby="send-file-tab">
             <div class="fixed-pane-container mb-0">
               <div class="header-area mb-0 pb-0">
                 <div class="row">
@@ -1557,8 +1608,8 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
                     </div>
                   </div>
                   <div class="col-2 mb-0 justify-content-end" style="display:flex; ">
-                    <span title="请先选择要发送的文件或目录，然后点击发送。&#10;接收完成前不能继续发送。&#10;Please select files or folders first,then click to send.&#10;Cannot send again before current transfer is done.">
-                      <button class="btn btn-warning" @click="sendFiles"  :disabled="!sendPaths || sendPaths.length === 0 || isSending">发送/Send</button>
+                    <span title="请先选择要发送的文件或目录，然后点击发送。&#10;接收完成前不能继续发送。&#10;Please select files or folders first,then click to send.&#10;Cannot send again before current transfer is done.&#10;&#10;Hotkey: Alt-S">
+                      <button class="btn btn-warning" @click="sendFiles"  :disabled="!sendPaths || sendPaths.length === 0 || isSending" >发送/Send</button>
                     </span>
                   </div>
                   <div class="col-12 mb-0 mt-0" v-show="sendPaths.length>0">
@@ -1617,8 +1668,8 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
                   </div>
                   </div>
                   <div class="col-2 mb-2">
-                    <span style="float:right;" title="输入对方Code后，点击接收文件。&#10;After entering the Code from other side,click to receive files.">
-                      <button class="btn btn-warning" @click="receiveFiles">接收/Receive</button>
+                    <span style="float:right;" title="输入对方Code后，点击接收文件。&#10;After entering the Code from other side,click to receive files.&#10;&#10;Hotkey: Alt-R">
+                      <button class="btn btn-warning" @click="receiveFiles" >接收/Receive</button>
                     </span>
                   </div>
                   <div class="col-12 mb-0 mt-0 " v-show="receivePaths.length>0" style="margin-top:0px;">
@@ -1669,14 +1720,14 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
                 <div class="row justify-content-end">
                   <div class="col-12 mb-2">
                     <span class="m-0 p-0 flex " style="float:right;" 
-                      title="发送文字后把Code告知对方以接收。&#10;接收完成前不能继续发送。&#10;After sending the message,inform the recipient of the Code so they can receive it.&#10;Cannot send again until the recipient has finished receiving it.">
-                      <button class="btn btn-warning" @click="sendText" style="width:115px;" :disabled="!inputText || inputText.trim().length === 0 || isSending">发送/Send</button>
+                      title="发送文字后把Code告知对方以接收。&#10;接收完成前不能继续发送。&#10;After sending the message,inform the recipient of the Code so they can receive it.&#10;Cannot send again until the recipient has finished receiving it.&#10;&#10;Hotkey: Alt-S">
+                      <button class="btn btn-warning" @click="sendText" style="width:130px;" :disabled="!inputText || inputText.trim().length === 0 || isSending" >发送/Send</button>
                     </span>
                   </div>
 
                   <div class="col-12">
-                    <span  style="float:right;" v-show="!chatEstablished" title="输入对方Code后，点击按钮接收信息。&#10;After entering the Code from sender,click to receive the message.">
-                      <button class="btn btn-warning" @click="receiveText" >接收/Receive</button>
+                    <span  style="float:right;" v-show="!chatEstablished" title="输入对方Code后，点击按钮接收信息。&#10;After entering the Code from sender,click to receive the message.&#10;&#10;Hotkey: Alt-R">
+                      <button class="btn btn-warning" @click="receiveText" style="width:130px;" >接收/Receive</button>
                     </span>
                   </div>
                 </div>
@@ -1995,5 +2046,4 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
       align-self:flex-end;
       background-color:#198754; /*#0078d4;*/
     }
-
 </style>

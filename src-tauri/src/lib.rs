@@ -21,7 +21,6 @@ use setting::{load_config, save_config, ConfigState};
 //use std::fs::{self};
 use once_cell::sync::Lazy;
 use std::sync::Arc;
-use std::thread;
 //use std::time::Duration;
 use str_oper::*;
 use tauri::Emitter;
@@ -899,7 +898,7 @@ async fn receive_text(
 
         // 保存stdin,用于初一异常交互Y/N
         let stdin=child.stdin.take().unwrap();
-        let state=GLOBAL_STDINS.lock().await.insert(code_str.clone(),Arc::new(Mutex::new(stdin)));
+        GLOBAL_STDINS.lock().await.insert(code_str.clone(),Arc::new(Mutex::new(stdin)));
 
         // 处理 croc 输出
         let mut full_output="".to_string();
