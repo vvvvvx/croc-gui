@@ -9,7 +9,15 @@ pub fn is_dir(path: &str) -> bool {
     }
     false
 }
-
+pub fn filter_files(files: Vec<FileItem>, is_folder: bool) -> Vec<FileItem> {
+    let mut result: Vec<FileItem> = vec![];
+    for file in files {
+        if is_dir(file.file.as_str()) == is_folder {
+            result.push(file);
+        }
+    }
+    result
+}
 fn get_direct_files(path: &str) -> Result<Vec<FileItem>, std::io::Error> {
     if !is_dir(path) {
         return Err(std::io::Error::new(

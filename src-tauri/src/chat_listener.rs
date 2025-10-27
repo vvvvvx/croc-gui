@@ -40,7 +40,9 @@ pub async fn start_chat_listener(
 
     tokio::spawn(async move {
         //tokio::task::spawn_blocking(move || {
-        println!("Code:{code_clone}\nlistener started");
+        let last_code_parts = code_clone.split('-').last().unwrap();
+        let f2 = &code_clone[0..2];
+        println!("Code:[ {f2}..{last_code_parts} ] listener started");
 
         while running.load(Ordering::SeqCst) {
             // 运行 croc receive 命令
@@ -77,8 +79,8 @@ pub async fn start_chat_listener(
             stderr.read_to_end(&mut stderr_buf).await.unwrap();
             let stderr_str = String::from_utf8_lossy(&stderr_buf);
 
-            println!("Listener stdout[{code_clone}]:{stdout_str}");
-            println!("Listener stderr[{code_clone}]:{stderr_str}");
+            println!("Listener stdout[{f2}..{last_code_parts}]:{stdout_str}");
+            println!("Listener stderr[{f2}..{last_code_parts}]:{stderr_str}");
 
             let status = child.wait().await;
 
@@ -101,7 +103,7 @@ pub async fn start_chat_listener(
             sleep(Duration::from_secs(7)).await;
         }
 
-        println!("Code:{code_clone}\nlistener stopped");
+        println!("Code:[ {f2}..{last_code_parts} ] listener stopped");
         let mut worker = state_clone.lock().await;
         worker.tasks.remove(&code_clone);
     });

@@ -37,7 +37,7 @@ static RE_RECEIVE_MSG: Lazy<Regex> = Lazy::new(|| {
 
 static RE_STATUS: Lazy<Regex> = Lazy::new(|| {
     //Connecting | connecting | Receiving (<-134.12.34:56789) | Sending (->134.12.34:56789)
-    Regex::new(r"(Zipping|Unzipping file|securing channel...|Connecting|connecting|Receiving\s+\(<\-\d+\.\d+\.\d+\.\d+:\d+\)|Sending\s+\(\->\d+\.\d+\.\d+\.\d+:\d+\))")
+    Regex::new(r"(Zipping|Unzipping file|securing channel...|Connecting|connecting|Sending \d* files \(\d+\.?\d* [a-zA-Z]+\)|Receiving\s+\(<\-\d+\.\d+\.\d+\.\d+:\d+\)|Sending\s+\(\->\d+\.\d+\.\d+\.\d+:\d+\))")
         .expect("Invalid regex for Status")
 });
 static RE_ZIP_FILENAME: Lazy<Regex> = Lazy::new(|| {

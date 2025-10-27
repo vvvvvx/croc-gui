@@ -11,6 +11,7 @@ use std::env::consts::OS;
 use std::io::{self, Read};
 use std::process::Stdio;
 use std::process::{Child, Command};
+use tokio::join;
 use tokio::process::{Child as tChild, Command as tCommand};
 //use tauri::plugin;
 use crate::types::{CrocWorker, EmitInfo, EmitProgress, FileItem};
@@ -41,6 +42,18 @@ pub static GLOBAL_STDINS: Lazy<
 
 // static CONFIRM_STATE: Lazy<Mutex<HashMap<String, Option<String>>>> =
 //     Lazy::new(|| Mutex::new(HashMap::new()));
+
+// #[tauri::command]
+// fn reg_hotkey(window: tauri::Window) {
+//     let app = window.app_handle();
+//     // register Alt-R
+//     let shortcut = Shortcut::new(None, tauri_plugin_global_shortcut::Code::KeyR).with_alt();
+//     app.global_shortcut()
+//         .register(shortcut, move || {
+//             window.emit("hotkey-r", {}).unwrap();
+//         })
+//         .expect("Failed to register shortcut");
+// }
 
 #[tauri::command]
 async fn send_files(
@@ -88,6 +101,9 @@ async fn send_files(
             .unwrap();
         return Ok(());
     }
+
+    // 发送file时，去除dir；发送folder时，去除files
+    files = filter_files(files, is_folder);
 
     for file in files.iter() {
         croc_args.push(file.file.clone());
@@ -352,8 +368,11 @@ async fn receive_files(
         let mut full_out="".to_string(); //for stdout
         let mut full_err="".to_string(); //for stderr
 
+        let stderr=BufReader::new(child.stderr.take().unwrap());
+        let stdout=BufReader::new(child.stdout.take().unwrap());
 
-        if let Some(stderr) = child.stderr.take() {
+        // if let Some(stderr) = child.stderr.take() {
+        let read_stderr= async {
             // let mut reader = io::BufReader::new(stderr);
             let mut reader = BufReader::new(stderr);
             let mut buffer = [0u8; 4096];
@@ -422,8 +441,9 @@ async fn receive_files(
                     }
                 }
             }
-        }
-        if let Some(stdout) = child.stdout.take() {
+        };
+        //if let Some(stdout) = child.stdout.take() {
+        let read_stdout = async {
             let mut reader = BufReader::new(stdout);
             let mut buffer = [0u8; 4096];
             loop {
@@ -439,6 +459,12 @@ async fn receive_files(
                                 .emit("croc-receive-file-status", Some(EmitInfo{croc_code:code_str.clone(),info: status.to_string()}))
                                 .unwrap();
                         }
+                        if output.contains("could not connect to") {
+                            window
+                                .emit("croc-receive-error", Some("网络连接失败，重试。\n\nNetwork connect failed, retry.".to_string()))
+                                .unwrap();
+                            // return "Repeated sending.".to_string();
+                        }
 
                         full_out+=output.as_str();
                     }
@@ -448,7 +474,8 @@ async fn receive_files(
                     }
                 }
             }
-        }
+        };
+        join!(read_stderr,read_stdout);
 
         println!("receive file full_stderr:{}",full_err);
         println!("receive file full_stdout:{}",full_out);
@@ -901,8 +928,14 @@ async fn receive_text(
         GLOBAL_STDINS.lock().await.insert(code_str.clone(),Arc::new(Mutex::new(stdin)));
 
         // 处理 croc 输出
-        let mut full_output="".to_string();
-        if let Some(stderr) = child.stderr.take() {
+        let mut full_err="".to_string();
+        let mut full_out="".to_string(); //for stdout
+        let stderr=BufReader::new(child.stderr.take().unwrap());
+        let stdout=BufReader::new(child.stdout.take().unwrap());
+
+        // if let Some(stderr) = child.stderr.take() {
+        let read_stderr= async {
+        //if let Some(stderr) = child.stderr.take() {
             let mut reader = BufReader::new(stderr);
             let mut buffer = [0u8; 4096];
             loop {
@@ -957,15 +990,17 @@ async fn receive_text(
 
                             // println!("files: {:?}", files);
                             // 发送更新后的文件状态列表到前端
-                            window
-                                .emit("croc-receive-file-progress", Some(EmitProgress{croc_code:code_str.clone(),files: files.clone()}))
-                                .unwrap();
+                            if files.len()>0 {
+                                window
+                                    .emit("croc-receive-file-progress", Some(EmitProgress{croc_code:code_str.clone(),files: files.clone()}))
+                                    .unwrap();
+                            }
 
                         }
                         if let Some(confirm)=get_confirm(&output) {
                             window.emit("croc_confirm", EmitInfo{croc_code:code_str.clone(),info:confirm}) .unwrap();
                         }
-                        full_output+=output.as_str();
+                        full_err+=output.as_str();
                     }
                     Err(err) => {
                         eprintln!("Error reading stderr: {err}");
@@ -973,19 +1008,48 @@ async fn receive_text(
                     }
                 }
             }
-        }
+        };
 
-        let mut stdout = child.stdout.take().unwrap();
-        let mut stdout_buf = Vec::new();
-        stdout.read_to_end(&mut stdout_buf).await.unwrap();
-        // croc send --text 时，正文在stdout
-        let full_out= String::from_utf8_lossy(&stdout_buf).to_string();
+        let read_stdout = async {
+            let mut reader = BufReader::new(stdout);
+            let mut buffer = [0u8; 4096];
+            loop {
+                match reader.read(&mut buffer).await {
+                    Ok(0) => break, // EOF
+                    Ok(n) => {
+                        let output = String::from_utf8_lossy(&buffer[..n]).to_string();
+                        println!("croc receive stdout: {output}");
+
+                        if let Some(status) = get_status(&output) {
+                            // println!("Extracted status: {}", status);
+                            window
+                                .emit("croc-receive-text-status", Some(EmitInfo{croc_code:code_str.clone(),info: status.to_string()}))
+                                .unwrap();
+                        }
+
+                        // croc send --text 时，正文在stdout
+                        full_out+=output.as_str();
+                    }
+                    Err(err) => {
+                        eprintln!("Error reading stdout: {err}");
+                        break;
+                    }
+                }
+            }
+        };
+        join!(read_stderr,read_stdout);
+
+        // let mut stdout = child.stdout.take().unwrap();
+        // let mut stdout_buf = Vec::new();
+        // stdout.read_to_end(&mut stdout_buf).await.unwrap();
+        // // croc send --text 时，正文在stdout
+        // let full_out= String::from_utf8_lossy(&stdout_buf).to_string();
 
         let status = child.wait().await.expect("Command wasn't running");
 
         if status.success() {
             //如果full_out是空，实际是接收的file,而非text
-            if full_out.is_empty(){
+            if full_out.is_empty() && files.len() > 0 {
                 // 传输完成，强制将所有文件状态更新为100%
                 replace_completed_percent(&mut files);
                 window.emit("croc-receive-file-progress", Some(EmitProgress{croc_code:code_str.clone(),files: files.clone()}))
@@ -1072,6 +1136,7 @@ pub fn run() {
         .manage(ConfigState(std::sync::RwLock::new(_cfg)))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        //.plugin(tauri_plugin_global_shortcut::Builder::new().build())
         //.plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
             send_files,

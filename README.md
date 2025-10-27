@@ -57,6 +57,7 @@ This detection is a false alarm, and the application is safe and clean.
 
 After install rust and npm,run the commands below：  
 cd croc-gui  
+npm install -g @tauri-apps/cli
 npm install  
 npm run tauri build
 
