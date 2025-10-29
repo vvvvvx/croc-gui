@@ -7,7 +7,7 @@
 import { onMounted,onBeforeUnmount,ref,nextTick,watch,computed} from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { downloadDir } from "@tauri-apps/api/path";
+//import { downloadDir } from "@tauri-apps/api/path";
 import { listen,UnlistenFn } from "@tauri-apps/api/event";
 import { getVersion } from '@tauri-apps/api/app';
 //import { ElMessageBox } from "element-plus";
@@ -120,7 +120,7 @@ const transferType = ref<string>(Type.FileSend as string);// FileSend | FileRece
 const remFileTab = ref<string>(Type.FileSend as string); // when leave FileTab,remember FileSend or FileReceive;
 const waitingCodesList = ref<string[]>([]); //Croc codes which are waiting for receiving
 //const savePath=ref<string>(""); // the directory to save the received files
-const savePathTmp=ref<string>(""); // the directory to save the received files
+//const savePathTmp=ref<string>(""); // the directory to save the received files
 const isSending=ref<boolean>(false); // Whether currently sending files
 const inputText=ref<string>(""); // text to send
 const fileProcessList = ref<fileProcess[]>([]); // for multi sending
@@ -138,7 +138,7 @@ const config =ref< sets.AppConfig >( {
         transfers: 8,
         //zip: false,
         //exclude: "",
-        overwrite: false,
+        overwrite: true,
         multicast: "",
         ip: "",
         local: false,
@@ -147,6 +147,7 @@ const config =ref< sets.AppConfig >( {
         relay_passwd: "",
         proxy_socks5: "",
         proxy_http: "",
+        save_path:"",
       });
 const colorRules = [
   { regex : /\(\s(Failed)\s\)\s*$/gm,color:'#992222'},
@@ -225,9 +226,9 @@ const savePath= computed<string>(()=> {
   const fp=fileProcessList.value.find(
     p => p.croc_code === crocCode.value && p.type == Type.FileReceive
   );
-  console.log("savePath:",fp ? fp.savePath: savePathTmp.value);
-  console.log("savePathTmp:",savePathTmp.value);
-  const result=fp ? fp.savePath : savePathTmp.value;
+  console.log("savePath:",fp ? fp.savePath: config.value.save_path);
+  console.log("savePathTmp:",config.value.save_path);
+  const result=fp ? fp.savePath : config.value.save_path;
 
   return String(result);
 });
@@ -452,8 +453,14 @@ function onInput(event:Event) {
   }
 }
 */
+function onSavePathBlur(){
+
+  sets.saveConfig(config.value);
+}
 function onSavePathInput(el:HTMLElement){
-  savePathTmp.value=(el as HTMLInputElement).value ;
+  //savePathTmp.value=(el as HTMLInputElement).value ;
+  config.value.save_path=(el as HTMLInputElement).value ;
+  //sets.saveConfig(config.value);
 }
 
 function onKeydown(event: KeyboardEvent) {
@@ -929,7 +936,9 @@ async function selectSaveFolder() {
     title: "选择保存目录/Select Save Folder",
   });
   if (typeof selected === "string") {
-    savePathTmp.value = selected;
+    //savePathTmp.value = selected;
+    config.value.save_path= selected;
+    sets.saveConfig(config.value);
   }
   console.log(selected);
 }
@@ -1094,7 +1103,7 @@ async function onReloadConfig() {
 */
 onMounted(async () => {
   //savePath.value = await homeDir();
-  savePathTmp.value = await downloadDir();
+  //savePathTmp.value = await downloadDir();
 
   // Read config file
   config.value = await sets.loadConfig();
@@ -1369,6 +1378,8 @@ onMounted(async () => {
       // s1111 = Sender's send code
       const code = role===Role.Sender ? "r2222-"+code3Last : "s1111-"+code3Last;
       invoke("start_chat_listener",{code: code} );
+      //invoke("add_code_task",{code: code} );
+      //invoke("start_global_listener");
     }
     console.log("Croc receive success:", message);
   });
@@ -1410,6 +1421,8 @@ onMounted(async () => {
       //alert("listenReceiveTextMsg code3Last："+code3Last);
 
       invoke("start_chat_listener",{code: "s1111-"+code3Last} );
+      //invoke("add_code_task",{code: "s1111-"+code3Last} );
+      //invoke("start_global_listener");
     } 
     let mainCode = ""
     if(isMainCode(msg.croc_code)){
@@ -1628,10 +1641,10 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
                   <div class="col-4 mb-3">
                     <div class="input-group mb-0 mt-0 ">
                       <button class="btn" @click="toggleFileMode" :class="isFolder ? 'btn-secondary' : 'btn-success btn-outline-warning' " style=" padding-left:3px;padding-right:3px;" title="选择要发送的文件&#10;Select files to send.">
-                        <img src="/assets/file.svg"  width="24" height="24" alt="Icon">SelectFiles
+                        <img src="/assets/file.svg"  width="24" height="24" alt="Icon">AddFiles
                       </button>&nbsp;
                       <button class="btn" @click="toggleFolderMode" :class="isFolder ? 'btn-success btn-outline-warning' : 'btn-secondary' " style=" padding-left:3px; padding-right:3px;" title="选择要发送的目录&#10;Select folders to send. ">
-                        SelectFolders<img src="/assets/folder.svg"  width="24" height="24" alt="Icon">
+                        AddFolders<img src="/assets/folder.svg"  width="24" height="24" alt="Icon">
                       </button>
                       <!--
                       &nbsp;&nbsp;&nbsp;&nbsp;
@@ -1697,7 +1710,7 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
                     <div class="d-flex">
                     <div class="input-group mb-0 mt-0" >
                       <span class="input-group-text text-white bg-secondary" id="">保存到/SaveTo</span>
-                      <input type="text" class="form-control" v-model="savePath" @input="onSavePathInput($event.currentTarget as HTMLElement)" title="接收文件的保存位置/Where to save the files." >
+                      <input type="text" class="form-control" v-model="savePath" @blur="onSavePathBlur"  @input="onSavePathInput($event.currentTarget as HTMLElement)" title="接收文件的保存位置/Where to save the files." >
                       <button class="btn btn-success" style="width:34px; padding-left:0px; padding-right:0px;" @click="selectSaveFolder" title="点击选择保存目录。&#10;Click to select save folder.">
                         <img src="/assets/folder.svg"  width="24" height="24" alt="Icon">
                       </button>

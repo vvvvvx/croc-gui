@@ -1,4 +1,4 @@
-use dirs::config_dir;
+use dirs::{config_dir, download_dir};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -21,6 +21,7 @@ pub struct AppConfig {
     pub relay_passwd: String, // 中继密码
     pub proxy_socks5: String,
     pub proxy_http: String,
+    pub save_path: String,
 }
 
 impl Default for AppConfig {
@@ -29,7 +30,7 @@ impl Default for AppConfig {
             transfers: Some(4),
             // zip: false,
             // exclude: "".to_string(),
-            overwrite: false,
+            overwrite: true,
             multicast: "".to_string(),
             ip: "".to_string(),
             local: false,
@@ -38,10 +39,10 @@ impl Default for AppConfig {
             relay_passwd: "".to_string(),
             proxy_socks5: "".to_string(),
             proxy_http: "".to_string(),
+            save_path: download_dir().unwrap().to_string_lossy().to_string(),
         }
     }
 }
-
 fn get_config_dir() -> PathBuf {
     let mut dir = config_dir().expect("Failed to get config dir");
     dir.push("croc-gui");

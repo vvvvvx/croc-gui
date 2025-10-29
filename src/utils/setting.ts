@@ -22,6 +22,7 @@ export interface AppConfig  {
   relay_passwd: string, // 中继密码
   proxy_socks5: string, 
   proxy_http: string,
+  save_path:string,
 }
 
 export async function loadConfig():Promise<AppConfig>{

@@ -18,6 +18,7 @@ use crate::types::{CrocWorker, EmitInfo, EmitProgress, FileItem};
 use crate::utils::*;
 use crate::version::check_update;
 use chat_listener::{start_chat_listener, stop_chat_listener};
+//use chat_listener::{add_code_task, start_global_listener, stop_code_task, stop_global_listener};
 use setting::{load_config, save_config, ConfigState};
 //use std::fs::{self};
 use once_cell::sync::Lazy;
@@ -58,12 +59,12 @@ pub static GLOBAL_STDINS: Lazy<
 #[tauri::command]
 async fn send_files(
     window: tauri::Window,
-    state: State<'_, ConfigState>,
-    mut files: Vec<FileItem>, // 需要发送的文件列表或目录
-    code: String,             // 传输代码Code
-    is_folder: bool,          // 是否为目录
-    zip: bool,                // if zip folder before sendding
-    exclude: String,          // exclude patterns when send folders
+    state: State<'_, ConfigState>, //全局配置
+    mut files: Vec<FileItem>,      // 需要发送的文件列表或目录
+    code: String,                  // 传输代码Code
+    is_folder: bool,               // 是否为目录
+    zip: bool,                     // if zip folder before sendding
+    exclude: String,               // exclude patterns when send folders
 ) -> Result<(), String> {
     let cfg = state.0.read().unwrap().clone();
 
@@ -529,9 +530,17 @@ async fn receive_files(
 async fn send_text(
     window: tauri::Window,
     state: State<'_, ConfigState>,
+    //state_worker: State<'_, Arc<Mutex<CrocWorker>>>,
     msg: String,  // 要发送的信息/ Msg to send
     code: String, // 传输代码Code
 ) -> Result<(), String> {
+    // let semaphore = {
+    //     let worker = state_worker.lock().await;
+    //     worker.semaphore.clone()
+    // };
+    // let _permit = semaphore.acquire().await.unwrap();
+    // println!("⏳send_text [ {code} ] got semaphore, running croc...");
+
     if msg.trim().is_empty() {
         window
             .emit(
@@ -772,78 +781,6 @@ async fn send_text(
             // }
         }
     }
-    //   } else {
-    // else waiting 10 minutes to kill
-    // match timeout(Duration::from_secs(600), child.wait()).await {
-    //     Ok(Ok(status)) => {
-    //         let code_str3 = code_timeout.lock().await.clone();
-    //         if status.success() {
-    //             win3.emit(
-    //                 "croc-send-text-success",
-    //                 Some(EmitInfo {
-    //                     croc_code: code_str3.clone().to_string(),
-    //                     info: msg,
-    //                 }),
-    //             )
-    //             .unwrap();
-    //         } else {
-    //             emit_exit_info(win3, "send", code_str3.clone(), status.code().unwrap());
-    //         }
-    //     }
-    //     Ok(Err(e)) => {
-    //         eprint!("Error while waiting process exit.");
-    //         let code_str3 = code_timeout.lock().await.clone();
-    //         win3.emit(
-    //             "croc-send-text-error",
-    //             Some(EmitInfo {
-    //                 croc_code: code_str3.clone(),
-    //                 info: format!("Process error:{e}"),
-    //             }),
-    //         )
-    //         .unwrap();
-    //     }
-    //     Err(_) => {
-    //         eprint!("Sending msg timeout, killing...\n");
-    //         let _ = child.kill().await;
-    //         let _ = win3.emit(
-    //             "croc-send-text-error",
-    //             Some(EmitInfo {
-    //                 croc_code: code_str3.clone(),
-    //                 info: "发送超时，重试。\nThe last msg sending timeout, retry.".to_string(),
-    //             }),
-    //         );
-    //     }
-    // }
-
-    // match child.wait().await {
-    //     Ok(status) => {
-    //         let code_str3 = code_timeout.lock().await.clone();
-    //         if status.success() {
-    //             win3.emit(
-    //                 "croc-send-text-success",
-    //                 Some(EmitInfo {
-    //                     croc_code: code_str3.clone().to_string(),
-    //                     info: msg,
-    //                 }),
-    //             )
-    //             .unwrap();
-    //         } else {
-    //             emit_exit_info(win3, "send", code_str3.clone(), status.code().unwrap());
-    //         }
-    //     }
-    //     Err(e) => {
-    //         eprint!("Error while waiting process exit.");
-    //         let code_str3 = code_timeout.lock().await.clone();
-    //         win3.emit(
-    //             "croc-send-error",
-    //             Some(EmitInfo {
-    //                 croc_code: code_str3.clone(),
-    //                 info: format!("Process error:{e}"),
-    //             }),
-    //         )
-    //         .unwrap();
-    //     }
-    // }
 
     Ok(())
 }
@@ -1027,6 +964,11 @@ async fn receive_text(
                                 .unwrap();
                         }
 
+                        if output.contains("could not connect to") {
+                            window
+                                .emit("croc-receive-error", Some("网络连接失败，重试。\n\nNetwork connect failed, retry.".to_string()))
+                                .unwrap();
+                        }
                         // croc send --text 时，正文在stdout
                         full_out+=output.as_str();
                     }
@@ -1127,6 +1069,7 @@ use crate::setting::{global_args, load_config_internal};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    //let worker = Arc::new(Mutex::new(CrocWorker::new()));
     //读取程序配置信息
     let _cfg = load_config_internal();
     let app = tauri::Builder::default()
@@ -1146,6 +1089,10 @@ pub fn run() {
             check_update,
             start_chat_listener,
             stop_chat_listener,
+            // add_code_task,
+            // stop_code_task,
+            // stop_global_listener,
+            // start_global_listener,
             load_config,
             save_config,
             write_stdin

@@ -3,6 +3,7 @@ use std::{
     collections::HashMap,
     sync::{atomic::AtomicBool, Arc},
 };
+use tokio::sync::Semaphore;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FileItem {
@@ -34,7 +35,24 @@ pub struct ProgressData {
 }
 
 // 用于聊天监听消息回复时的，进程全局控制
-#[derive(Default)]
+//#[derive(Default)]
 pub struct CrocWorker {
     pub tasks: HashMap<String, Arc<AtomicBool>>, // code -> running flag
+    // pub running: Arc<AtomicBool>,                // 整体轮询任务是否在运行
+    pub semaphore: Arc<Semaphore>, //控制每刻只有一个croc运行。
+}
+
+impl Default for CrocWorker {
+    // pub fn new() -> Self {
+    //     Self {
+    //         tasks: HashMap::new(),
+    //         semaphore: Arc::new(Semaphore::new(1)), //同时只有一个croc运行
+    //     }
+    // }
+    fn default() -> Self {
+        Self {
+            tasks: HashMap::new(),
+            semaphore: Arc::new(Semaphore::new(1)), //同时只有一个croc运行
+        }
+    }
 }
