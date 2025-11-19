@@ -610,6 +610,7 @@ version = "0.9.4"
 dependencies = [
  "dirs 5.0.1",
  "once_cell",
+ "open",
  "regex",
  "reqwest",
  "serde",

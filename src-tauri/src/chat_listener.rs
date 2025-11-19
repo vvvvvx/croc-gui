@@ -23,7 +23,6 @@ pub async fn start_chat_listener(
 ) -> Result<(), String> {
     // 控制监听运行和退出。true时在running,false时退出监听循环。
     let mut worker = state.lock().await;
-
     // 如果该 code 已在运行，则返回
     if let Some(flag) = worker.tasks.get(&code) {
         if flag.load(Ordering::SeqCst) {
@@ -31,28 +30,38 @@ pub async fn start_chat_listener(
             return Ok(());
         }
     }
-
     let running = Arc::new(AtomicBool::new(true));
     worker.tasks.insert(code.clone(), running.clone());
-
-    //let semaphore = worker.semaphore.clone();
-
-    //let window_clone = window.clone();
     let state_clone = state.inner().clone();
+
     //提前释放锁
     drop(worker);
     let code_clone = code.clone();
 
     tokio::spawn(async move {
         //tokio::task::spawn_blocking(move || {
-        let last_code_parts = code_clone.split('-').last().unwrap();
+        // let last_code_parts = code_clone.split('-').last().unwrap();
+        let last_code_parts = code_clone.split('-').next_back().unwrap();
         let f2 = &code_clone[0..2];
         println!("Code:[ {f2}..{last_code_parts} ] listener started");
-
         while running.load(Ordering::SeqCst) {
             // {
             //     let _permit = semaphore.clone().acquire_owned().await.unwrap();
             //     println!("⏳ [ {f2}..{last_code_parts} ] got semaphore, running croc...");
+
+            // use chrono::Local;
+            // use chrono::Timelike;
+            // let sec = Local::now().time().second();
+            // println!("Second : {sec}");
+            //
+            // // 每个10秒的前4秒:0123用于发送，第8、9秒用于接收消息，避免同时发送和接收端口冲突。
+            // let d = sec % 10;
+            // if d != 8 {
+            //     sleep(Duration::from_secs(1)).await;
+            //     continue;
+            // }
+            //
+            // println!("Receiving message...");
             // 运行 croc receive 命令
             #[cfg(windows)]
             let mut child = tCommand::new("croc")
@@ -108,8 +117,8 @@ pub async fn start_chat_listener(
                 }
             }
             // }
-            // 每 10 秒再检测一次
-            sleep(Duration::from_secs(5)).await;
+            // 每 5 秒再检测一次
+            sleep(Duration::from_secs(7)).await;
         }
 
         println!("Code:[ {f2}..{last_code_parts} ] listener stopped");

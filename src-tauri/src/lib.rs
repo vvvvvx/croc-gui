@@ -6,6 +6,7 @@ pub mod types;
 pub mod utils;
 pub mod version;
 
+// use chrono::Timelike;
 use std::collections::HashMap;
 use std::env::consts::OS;
 use std::io::{self, Read};
@@ -37,25 +38,39 @@ use tokio::time::{timeout, Duration};
 use std::os::windows::process::CommandExt;
 
 // 用于处理croc进程运行中的实时交互。回答Y/N
-pub static GLOBAL_STDINS: Lazy<
-    Arc<Mutex<HashMap<String, Arc<Mutex<tokio::process::ChildStdin>>>>>,
-> = Lazy::new(|| Arc::new(Mutex::new(HashMap::new())));
+use tokio::process::ChildStdin;
+type StdinHandle = Arc<Mutex<ChildStdin>>;
+type StdinMap = HashMap<String, StdinHandle>;
+type GlobalStdinMap = Arc<Mutex<StdinMap>>;
 
-// static CONFIRM_STATE: Lazy<Mutex<HashMap<String, Option<String>>>> =
-//     Lazy::new(|| Mutex::new(HashMap::new()));
+pub static GLOBAL_STDINS: Lazy<GlobalStdinMap> = Lazy::new(|| Arc::new(Mutex::new(HashMap::new())));
+// pub static GLOBAL_STDINS: Lazy<
+//     Arc<Mutex<HashMap<String, Arc<Mutex<tokio::process::ChildStdin>>>>>,
+// > = Lazy::new(|| Arc::new(Mutex::new(HashMap::new())));
 
-// #[tauri::command]
-// fn reg_hotkey(window: tauri::Window) {
-//     let app = window.app_handle();
-//     // register Alt-R
-//     let shortcut = Shortcut::new(None, tauri_plugin_global_shortcut::Code::KeyR).with_alt();
-//     app.global_shortcut()
-//         .register(shortcut, move || {
-//             window.emit("hotkey-r", {}).unwrap();
-//         })
-//         .expect("Failed to register shortcut");
-// }
+use open::that;
+use std::path::Path;
+#[tauri::command]
+fn goto_folder(folder_path: &str) {
+    println!("folder_path:{}", folder_path);
 
+    let dir_path = Path::new(folder_path);
+
+    if !dir_path.is_dir() {
+        if let Some(dir_path) = dir_path.parent() {
+            match that(dir_path) {
+                Ok(_) => println!("Directory opened successfully."),
+                Err(err) => eprintln!("Failed to open directory: {}", err),
+            }
+        }
+        return;
+    }
+
+    match that(dir_path) {
+        Ok(_) => println!("Directory opened successfully."),
+        Err(err) => eprintln!("Failed to open directory: {}", err),
+    }
+}
 #[tauri::command]
 async fn send_files(
     window: tauri::Window,
@@ -124,6 +139,7 @@ async fn send_files(
             Command::new("croc")
                 .args(croc_args)
                 .env("CROC_SECRET", code2.clone()) // 设置环境变量
+                .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()
@@ -132,6 +148,7 @@ async fn send_files(
             Command::new("croc")
                 .args(croc_args)
                 .env("CROC_NOUI", true.to_string())
+                .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()
@@ -143,6 +160,7 @@ async fn send_files(
             .args(croc_args)
             // windows下需要设置不显示命令行窗口
             .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -360,7 +378,7 @@ async fn receive_files(
             .spawn()
             .expect("Failed to start croc command");
 
-        // 保存stdin,用于初一异常交互Y/N
+        // 保存stdin,用于处理异常交互Y/N
         let stdin=child.stdin.take().unwrap();
         let state=GLOBAL_STDINS.lock().await.insert(code_str.clone(),Arc::new(Mutex::new(stdin)));
         //let mut state=GLOBAL_STDINS.lock().await.insert(code_str.clone(),Arc::new(Mutex::new(None)));
@@ -478,8 +496,8 @@ async fn receive_files(
         };
         join!(read_stderr,read_stdout);
 
-        println!("receive file full_stderr:{}",full_err);
-        println!("receive file full_stdout:{}",full_out);
+        println!("receive file full_stderr:{full_err}");
+        println!("receive file full_stdout:{full_out}");
         // let mut stdout = child.stdout.take().unwrap();
         // let mut stdout_buf = Vec::new();
         // stdout.read_to_end(&mut stdout_buf).unwrap();
@@ -530,7 +548,7 @@ async fn receive_files(
 async fn send_text(
     window: tauri::Window,
     state: State<'_, ConfigState>,
-    //state_worker: State<'_, Arc<Mutex<CrocWorker>>>,
+    // state_worker: State<'_, Arc<Mutex<CrocWorker>>>,
     msg: String,  // 要发送的信息/ Msg to send
     code: String, // 传输代码Code
 ) -> Result<(), String> {
@@ -573,19 +591,42 @@ async fn send_text(
 
     //let code2 = code.clone();
     // tokio::task::spawn_blocking(move || {
+    // use chrono::Local;
+    // use tokio::time::sleep;
+    // loop {
+    //     let worker = state_worker.lock().await;
+    //     use std::sync::atomic::Ordering;
+    //     let diff = if let Some(diff) = worker.second_diff.get(&code).cloned() {
+    //         diff.load(Ordering::SeqCst)
+    //     } else {
+    //         0
+    //     };
+    //     drop(worker);
+    //     let sec = Local::now().time().second();
+    //     println!("Second : {sec}");
+    //     let d = (sec + diff) % 10;
+    //     // 每个10秒的前4秒:0123用于发送，第8、9秒用于接收消息，避免同时发送和接收端口冲突。
+    //     if d != 3 {
+    //         sleep(Duration::from_secs(1)).await;
+    //         continue;
+    //     }
+    //
+    //     println!("Sending message...");
     #[cfg(not(windows))]
     let mut child: tChild = if !code.trim().is_empty() {
         tCommand::new("croc")
-            .args(croc_args)
+            .args(croc_args.clone())
             .env("CROC_SECRET", code.clone()) // 设置环境变量
+            .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .expect("Failed to start croc command")
     } else {
         tCommand::new("croc")
-            .args(croc_args)
+            .args(croc_args.clone())
             .env("CROC_NOUI", true.to_string())
+            .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -597,6 +638,7 @@ async fn send_text(
         .args(croc_args)
         // windows下需要设置不显示命令行窗口
         .creation_flags(0x08000000) // CREATE_NO_WINDOW
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -608,15 +650,17 @@ async fn send_text(
     // 处理 croc 输出
     let mut full_output = "".to_string();
 
+    // let worker_real = state_worker.inner().clone();
+
     if let Some(stderr) = child.stderr.take() {
         let win1 = window.clone();
         // 克隆到 stderr 异步任务
         let code_stderr = code_shared.clone();
         let mut reader = BufReader::new(stderr);
         let mut buffer = [0u8; 4096];
+        // let worker_clone = worker_real.clone();
         tokio::spawn(async move {
             let mut code_str1 = code_stderr.lock().await.clone();
-
             loop {
                 match reader.read(&mut buffer).await {
                     Ok(0) => break, // EOF
@@ -651,6 +695,18 @@ async fn send_text(
                             // return "Repeated sending.".to_string();
                         }
                         if output.contains("could not secure channel") {
+                            // let mut worker = worker_clone.lock().await;
+                            // if let Some(diff_arc) = worker.second_diff.get(&code) {
+                            //     let df = 5 - sec;
+                            //     diff_arc.store(df.clone(), Ordering::SeqCst);
+                            // } else {
+                            //     let df = 5 - sec;
+                            //     use std::sync::atomic::AtomicU32;
+                            //     let df2 = Arc::new(AtomicU32::new(df));
+                            //     worker.second_diff.insert(code.clone(), df2.clone());
+                            // }
+                            // drop(worker);
+
                             win1.emit(
                                 "croc-send-text-error",
                                 Some(EmitInfo {
@@ -691,6 +747,7 @@ async fn send_text(
         let code_stdout = code_shared.clone();
         let win2 = window.clone();
 
+        // let worker_clone = worker_real.clone();
         tokio::spawn(async move {
             let mut stdout_buf = Vec::new();
             stdout.read_to_end(&mut stdout_buf).await.unwrap();
@@ -699,6 +756,18 @@ async fn send_text(
             println!("send msg stdout:{full_out}");
             if full_out.contains("could not secure channel") {
                 let code_str2 = code_stdout.lock().await.clone();
+
+                // let mut worker = worker_clone.lock().await;
+                // if let Some(diff_arc) = worker.second_diff.get(&code_str2) {
+                //     let df = 5 - sec;
+                //     diff_arc.store(df.clone(), Ordering::SeqCst);
+                // } else {
+                //     let df = 5 - sec;
+                //     use std::sync::atomic::AtomicU32;
+                //     let df2 = Arc::new(AtomicU32::new(df));
+                //     worker.second_diff.insert(code_str2.clone(), df2.clone());
+                // }
+                // drop(worker);
 
                 win2.emit(
                     "croc-send-text-error",
@@ -746,7 +815,7 @@ async fn send_text(
                     "croc-send-text-success",
                     Some(EmitInfo {
                         croc_code: code_str3.clone().to_string(),
-                        info: msg,
+                        info: msg.clone(),
                     }),
                 )
                 .unwrap();
@@ -769,7 +838,7 @@ async fn send_text(
         Err(_) => {
             let code_str3 = code_timeout.lock().await.clone();
             // if code_str3.starts_with("s1111") || code_str3.starts_with("r2222") {
-            eprint!("Sending msg timeout, killing...\n");
+            eprintln!("Sending msg timeout, killing...");
             let _ = child.kill().await;
             let _ = win3.emit(
                 "croc-send-text-error",
@@ -781,6 +850,8 @@ async fn send_text(
             // }
         }
     }
+    //     break; // exit loop
+    // } //loop code block end
 
     Ok(())
 }
@@ -875,6 +946,7 @@ async fn receive_text(
         //if let Some(stderr) = child.stderr.take() {
             let mut reader = BufReader::new(stderr);
             let mut buffer = [0u8; 4096];
+            let mut st="".to_string();
             loop {
                 match reader.read(&mut buffer).await {
                     Ok(0) => break, // EOF
@@ -884,6 +956,7 @@ async fn receive_text(
 
                         if let Some(status) = get_status(&output) {
                             // println!("Extracted status: {}", status);
+                            st=status.clone();
                             window
                                 .emit("croc-receive-text-status", Some(EmitInfo{croc_code:code_str.clone(),info: status.to_string()}))
                                 .unwrap();
@@ -927,11 +1000,14 @@ async fn receive_text(
 
                             // println!("files: {:?}", files);
                             // 发送更新后的文件状态列表到前端
-                            if files.len()>0 {
+                            if !files.is_empty() {
                                 window
                                     .emit("croc-receive-file-progress", Some(EmitProgress{croc_code:code_str.clone(),files: files.clone()}))
                                     .unwrap();
                             }
+                            window
+                                .emit("croc-receive-file-status", Some(EmitInfo{croc_code:code_str.clone(),info: st.clone()}))
+                                .unwrap();
 
                         }
                         if let Some(confirm)=get_confirm(&output) {
@@ -991,7 +1067,7 @@ async fn receive_text(
 
         if status.success() {
             //如果full_out是空，实际是接收的file,而非text
-            if full_out.is_empty() && files.len() > 0 {
+            if full_out.is_empty() && !files.is_empty()  {
                 // 传输完成，强制将所有文件状态更新为100%
                 replace_completed_percent(&mut files);
                 window.emit("croc-receive-file-progress", Some(EmitProgress{croc_code:code_str.clone(),files: files.clone()}))
@@ -1095,7 +1171,8 @@ pub fn run() {
             // start_global_listener,
             load_config,
             save_config,
-            write_stdin
+            write_stdin,
+            goto_folder
         ])
         // .run(tauri::generate_context!())
         .build(tauri::generate_context!())

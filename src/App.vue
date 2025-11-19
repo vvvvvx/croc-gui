@@ -1254,8 +1254,11 @@ onMounted(async () => {
           memo.value=input_memo;
           // if receive files at TextChat tab
           if(transferType.value!==Type.FileReceive){
-            newArrivalStatusSet(pr.croc_code,Type.FileReceive ,true);
+            //newArrivalStatusSet(pr.croc_code,Type.FileReceive ,true);
             console.log("File newArrival:",true);
+            // switch to FileReceive tab
+            transferType.value=Type.FileReceive ;
+            switchTab();
           }
     }
     console.log("Receive progress update:", pr.files);
@@ -1274,6 +1277,7 @@ onMounted(async () => {
 
     fileTransStatusUpdate(msg.croc_code,Type.FileReceive,"Received all");
     darkAlert(msg.info+"\n\n");
+    invoke("goto_folder",{ folderPath: config.value.save_path } );
     console.log("Croc receive success:", fileProcessList.value);
   });
 
@@ -1409,6 +1413,9 @@ onMounted(async () => {
       if(transferType.value===Type.FileReceive){
         const index=fileProcessList.value.findIndex(fp => fp.croc_code===msg.croc_code && fp.type===Type.FileReceive );
         if(index!==-1) fileProcessList.value.splice(index,1);
+        // 切换到TextChat界面
+        transferType.value=Type.TextChat;
+        switchTab();
       }
       
       // 开始持续监听发送方消息
@@ -1622,12 +1629,12 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
         <ul class="nav nav-tabs mb-0" style="margin-left:10px;" id="secondTab" role="tablist">
           <li class="nav-item" role="presentation">
             <button class="nav-link active" @click="onClickFileSend" id="send-file-tab" data-bs-toggle="tab" data-bs-target="#send-file-pane" type="button" role="tab" title="Hotkey: Alt-D" >
-              发送/Sen<u>d</u>
+              发/Sen<u>d</u>
             </button>
           </li>
           <li class="nav-item" role="presentation">
             <button class="nav-link" @click="onClickFileReceive" id="receive-file-tab" data-bs-toggle="tab" data-bs-target="#receive-file-pane" type="button" role="tab" title="Hotkey: Alt-V" >
-              接收/Recei<u>v</u>e
+              收/ Recei<u>v</u>e
             </button>
           </li>
         </ul>
@@ -2094,6 +2101,7 @@ When receiving,enter the Code provided by other side.&#10;When transmitting cont
       padding:6px 10px;
       border-radius:8px;
       white-space: pre-wrap;
+      overflow-wrap: break-word;
     }
     .msg.from {
       align-self: flex-start;

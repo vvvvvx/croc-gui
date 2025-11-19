@@ -27,11 +27,12 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 tauri-plugin-shell = "2.3.1"
+open = "5.3.0"
 regex = "1.10"
 once_cell = "1.19"
 reqwest = { version = "0.12.15", features = ["json"] }
 dirs = "5"
-
+# chrono = {version = "0.4", features = ["clock"] }
 [profile.release]
 opt-level = 'z'
 lto = true
